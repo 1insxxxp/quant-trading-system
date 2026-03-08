@@ -77,7 +77,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     
     try {
       const response = await fetch(
-        `/api/klines?exchange=${exchange}&symbol=${symbol}&interval=${interval}&limit=1000`
+        `/quant/api/klines?exchange=${exchange}&symbol=${symbol}&interval=${interval}&limit=1000`
       );
       const data = await response.json();
 
