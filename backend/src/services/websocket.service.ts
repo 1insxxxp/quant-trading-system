@@ -2,6 +2,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 import type { Kline, WsMessage } from '../types/index.js';
 import { BinanceAdapter } from '../exchanges/binance.js';
 import { OKXAdapter } from '../exchanges/okx.js';
+import { klineService } from './kline.service.js';
 import type { ExchangeAdapter } from '../types/index.js';
 
 interface Subscription {
@@ -172,6 +173,10 @@ export class WebSocketService {
     const key = `${exchange}:${symbol}:${interval}`;
     const subscribers = this.subscriptions.get(key);
 
+    void klineService.saveKline(kline).catch((error) => {
+      console.error('保存实时 K 线失败:', error);
+    });
+
     if (!subscribers || subscribers.size === 0) {
       return;
     }
@@ -220,7 +225,7 @@ export class WebSocketService {
   // 关闭服务
   close() {
     // 取消所有交易所订阅
-    this.activeSubscriptions.forEach((subscription, key) => {
+    this.activeSubscriptions.forEach((_subscription, key) => {
       this.stopExchangeSubscription(key);
     });
 

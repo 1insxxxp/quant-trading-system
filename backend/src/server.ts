@@ -7,15 +7,15 @@ import { BinanceAdapter } from './exchanges/binance.js';
 import { OKXAdapter } from './exchanges/okx.js';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const WS_PORT = process.env.WS_PORT || 3001;
+const PORT = Number(process.env.PORT ?? 3000);
+const WS_PORT = Number(process.env.WS_PORT ?? 3001);
 
 // 中间件
 app.use(cors());
 app.use(express.json());
 
 // 健康检查
-app.get('/api/health', (req, res) => {
+app.get('/api/health', (_req, res) => {
   res.json({
     success: true,
     status: 'ok',
@@ -29,10 +29,11 @@ app.get('/api/klines', async (req, res) => {
     const { exchange, symbol, interval, limit } = req.query;
 
     if (!exchange || !symbol || !interval) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: '缺少参数：需要 exchange, symbol, interval',
       });
+      return;
     }
 
     const klines = await klineService.getKlines(
@@ -57,7 +58,7 @@ app.get('/api/klines', async (req, res) => {
 });
 
 // 获取支持的交易所
-app.get('/api/exchanges', (req, res) => {
+app.get('/api/exchanges', (_req, res) => {
   res.json({
     success: true,
     exchanges: klineService.getExchanges(),
@@ -65,10 +66,10 @@ app.get('/api/exchanges', (req, res) => {
 });
 
 // 获取交易对列表
-app.get('/api/symbols', (req, res) => {
+app.get('/api/symbols', async (req, res) => {
   try {
     const { exchange, type } = req.query;
-    const symbols = klineService.getSymbols(
+    const symbols = await klineService.getSymbols(
       exchange as string,
       type as string
     );

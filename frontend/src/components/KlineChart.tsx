@@ -6,6 +6,7 @@ export const KlineChart: React.FC = () => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const previousDataRef = useRef<CandlestickData[]>([]);
   
   const { klines, exchange, symbol, interval } = useMarketStore();
 
@@ -49,6 +50,7 @@ export const KlineChart: React.FC = () => {
 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
+    previousDataRef.current = [];
 
     // 响应式调整大小
     const handleResize = () => {
@@ -63,6 +65,7 @@ export const KlineChart: React.FC = () => {
 
     return () => {
       window.removeEventListener('resize', handleResize);
+      previousDataRef.current = [];
       chart.remove();
     };
   }, []);
@@ -91,8 +94,29 @@ export const KlineChart: React.FC = () => {
       close: k.close,
     }));
 
-    console.log(`📈 设置图表数据，第一条：${data[0].time}, 最后一条：${data[data.length - 1].time}`);
-    candleSeriesRef.current.setData(data);
+    const previousData = previousDataRef.current;
+    const previousLast = previousData[previousData.length - 1];
+    const nextLast = data[data.length - 1];
+
+    console.log(`📈 设置图表数据，第一条：${data[0].time}, 最后一条：${nextLast.time}`);
+
+    if (previousData.length === 0) {
+      candleSeriesRef.current.setData(data);
+      chartRef.current?.timeScale().fitContent();
+    } else if (
+      previousData.length === data.length &&
+      previousLast?.time === nextLast.time
+    ) {
+      candleSeriesRef.current.update(nextLast);
+    } else if (previousData.length + 1 === data.length) {
+      candleSeriesRef.current.update(nextLast);
+      chartRef.current?.timeScale().scrollToRealTime();
+    } else {
+      candleSeriesRef.current.setData(data);
+      chartRef.current?.timeScale().fitContent();
+    }
+
+    previousDataRef.current = data;
     console.log('✅ 图表数据已更新');
   }, [klines, exchange, symbol, interval]); // 所有依赖都加上
 

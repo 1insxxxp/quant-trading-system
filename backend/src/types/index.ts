@@ -38,15 +38,24 @@ export interface ExchangeAdapter {
     callback: (price: number) => void
   ): () => void;
   getSymbols(): Promise<SymbolInfo[]>;
+  closeAll?: () => void;
 }
 
 // WebSocket 消息类型
 export interface WsMessage {
-  type: 'subscribe' | 'unsubscribe' | 'kline' | 'price' | 'error';
+  type:
+    | 'subscribe'
+    | 'unsubscribe'
+    | 'subscribed'
+    | 'unsubscribed'
+    | 'connected'
+    | 'kline'
+    | 'price'
+    | 'error';
   exchange?: string;
   symbol?: string;
   interval?: string;
-  data?: Kline | number;
+  data?: Kline | number | { message: string };
   error?: string;
 }
 

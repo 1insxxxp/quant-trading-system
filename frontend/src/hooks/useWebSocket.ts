@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useMarketStore } from '../stores/marketStore';
+import { getMarketKey, useMarketStore } from '../stores/marketStore';
 import type { Kline } from '../types/index';
 
 export const useWebSocket = () => {
@@ -15,6 +15,7 @@ export const useWebSocket = () => {
   } = useMarketStore();
 
   useEffect(() => {
+    const marketKey = getMarketKey(exchange, symbol, interval);
     console.log(`🔄 WebSocket 重新连接：${exchange} ${symbol} ${interval}`);
     
     // 关闭旧连接
@@ -45,10 +46,27 @@ export const useWebSocket = () => {
     ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data.toString());
+        const activeState = useMarketStore.getState();
+        const activeMarketKey = getMarketKey(
+          activeState.exchange,
+          activeState.symbol,
+          activeState.interval,
+        );
+
+        if (activeMarketKey !== marketKey) {
+          return;
+        }
 
         switch (message.type) {
           case 'kline':
             const kline: Kline = message.data;
+            if (
+              message.exchange !== exchange ||
+              message.symbol !== symbol ||
+              message.interval !== interval
+            ) {
+              return;
+            }
             console.log('📊 收到 K 线更新:', kline.close);
             updateKline(kline);
             

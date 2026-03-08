@@ -3,16 +3,19 @@ import { Toolbar } from './components/Toolbar';
 import { KlineChart } from './components/KlineChart';
 import { PriceBoard } from './components/PriceBoard';
 import { useWebSocket } from './hooks/useWebSocket';
+import { getMarketKey, useMarketStore } from './stores/marketStore';
 
 const App: React.FC = () => {
   // 初始化 WebSocket 连接
   useWebSocket();
+  const { exchange, symbol, interval } = useMarketStore();
+  const marketKey = getMarketKey(exchange, symbol, interval);
 
   return (
     <div style={styles.app}>
       <Toolbar />
       <PriceBoard />
-      <KlineChart />
+      <KlineChart key={marketKey} />
     </div>
   );
 };

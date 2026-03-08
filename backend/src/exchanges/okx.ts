@@ -7,24 +7,14 @@ export class OKXAdapter implements ExchangeAdapter {
   private wsUrl = 'wss://ws.okx.com:8443/ws/v5/public';
   private wsConnections: Map<string, WebSocket> = new Map();
 
-  // 时间周期映射（OKX API → 内部标准）
-  private okxIntervalMap: Record<string, string> = {
+  // OKX API 使用大写周期格式
+  private intervalMap: Record<string, string> = {
     '1m': '1m',
     '5m': '5m',
     '15m': '15m',
     '1h': '1H',
     '4h': '4H',
     '1d': '1D',
-  };
-
-  // 反向映射（内部标准 ← OKX API）
-  private intervalMap: Record<string, string> = {
-    '1m': '1m',
-    '5m': '5m',
-    '15m': '15m',
-    '1h': '1h',
-    '4h': '4h',
-    '1d': '1d',
   };
 
   // 获取 K 线数据
@@ -40,21 +30,25 @@ export class OKXAdapter implements ExchangeAdapter {
         },
       });
 
-      return response.data.data.map((k: string[]) => ({
-        exchange: 'okx',
-        symbol: instId.replace('-', ''),
-        interval: interval, // 使用传入的 interval，不要用映射
-        open_time: new Date(k[0]).getTime(),
-        close_time: new Date(k[0]).getTime() + this.getIntervalMs(interval),
-        open: parseFloat(k[1]),
-        high: parseFloat(k[2]),
-        low: parseFloat(k[3]),
-        close: parseFloat(k[4]),
-        volume: parseFloat(k[5]),
-        quote_volume: parseFloat(k[6]),
-        trades_count: undefined,
-        is_closed: 1,
-      }));
+      return response.data.data.map((k: string[]) => {
+        const openTime = Number(k[0]);
+
+        return {
+          exchange: 'okx',
+          symbol: symbol.toUpperCase(),
+          interval: interval, // 使用传入的 interval，不要用映射
+          open_time: openTime,
+          close_time: openTime + this.getIntervalMs(interval),
+          open: parseFloat(k[1]),
+          high: parseFloat(k[2]),
+          low: parseFloat(k[3]),
+          close: parseFloat(k[4]),
+          volume: parseFloat(k[5]),
+          quote_volume: parseFloat(k[6]),
+          trades_count: undefined,
+          is_closed: 1,
+        };
+      });
     } catch (error: any) {
       console.error('OKX getKlines error:', error.message);
       throw new Error(`OKX API error: ${error.message}`);
@@ -98,13 +92,14 @@ export class OKXAdapter implements ExchangeAdapter {
         if (data.arg && data.arg.channel && data.arg.channel.startsWith('candle')) {
           const k = data.data[0];
           if (!k) return;
+          const openTime = Number(k[0]);
 
           const kline: Kline = {
             exchange: 'okx',
             symbol: symbol.toUpperCase(),
             interval: interval, // 使用传入的 interval
-            open_time: new Date(k[0]).getTime(),
-            close_time: new Date(k[0]).getTime() + this.getIntervalMs(interval),
+            open_time: openTime,
+            close_time: openTime + this.getIntervalMs(interval),
             open: parseFloat(k[1]),
             high: parseFloat(k[2]),
             low: parseFloat(k[3]),
