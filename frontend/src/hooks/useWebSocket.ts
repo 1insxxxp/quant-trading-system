@@ -23,8 +23,9 @@ export const useWebSocket = () => {
       wsRef.current.close();
     }
 
-    // 连接 WebSocket
-    const wsUrl = `ws://localhost:4001`;
+    // 连接 WebSocket - 使用相对路径，适配部署环境
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${window.location.host}/quant/ws`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
