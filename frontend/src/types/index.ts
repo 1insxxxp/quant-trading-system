@@ -29,4 +29,5 @@ export interface MarketState {
   updateKline: (kline: Kline) => void;
   setLatestPrice: (price: number) => void;
   setIsConnected: (connected: boolean) => void;
+  fetchKlines: () => Promise<void>;
 }
