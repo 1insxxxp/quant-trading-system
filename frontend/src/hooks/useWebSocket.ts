@@ -11,7 +11,6 @@ export const useWebSocket = () => {
     updateKline,
     setLatestPrice,
     setIsConnected,
-    setKlines,
     fetchKlines,
   } = useMarketStore();
 
