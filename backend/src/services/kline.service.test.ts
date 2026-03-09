@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockDb, binanceAdapterMock, okxAdapterMock } = vi.hoisted(() => ({
+const { mockDb, binanceAdapterMock, okxAdapterMock, syncStateMock } = vi.hoisted(() => ({
   mockDb: {
     getKlines: vi.fn(),
+    getKlineSyncState: vi.fn(),
     saveKline: vi.fn(),
     saveKlines: vi.fn(),
     getSymbols: vi.fn(),
@@ -12,6 +13,10 @@ const { mockDb, binanceAdapterMock, okxAdapterMock } = vi.hoisted(() => ({
   },
   okxAdapterMock: {
     getKlines: vi.fn(),
+  },
+  syncStateMock: {
+    recordHistorySyncSuccess: vi.fn(),
+    recordHistorySyncError: vi.fn(),
   },
 }));
 
@@ -29,6 +34,10 @@ vi.mock('../exchanges/binance.js', () => ({
 
 vi.mock('../exchanges/okx.js', () => ({
   OKXAdapter: vi.fn(() => okxAdapterMock),
+}));
+
+vi.mock('./sync-state.service.js', () => ({
+  syncStateService: syncStateMock,
 }));
 
 import { KlineService } from './kline.service.js';
@@ -53,6 +62,7 @@ function makeKline(openTime: number, exchange = 'binance') {
 describe('KlineService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockDb.getKlineSyncState.mockResolvedValue(null);
     mockDb.saveKline.mockResolvedValue(undefined);
     mockDb.saveKlines.mockResolvedValue(undefined);
   });
@@ -84,6 +94,14 @@ describe('KlineService', () => {
 
     expect(okxAdapterMock.getKlines).toHaveBeenCalledWith('ETHUSDT', '5m', 101, undefined);
     expect(mockDb.saveKlines).toHaveBeenCalledWith(remoteKlines);
+    expect(syncStateMock.recordHistorySyncSuccess).toHaveBeenCalledWith(
+      'okx',
+      'ETHUSDT',
+      '5m',
+      remoteKlines,
+      false,
+      'okx',
+    );
     expect(result).toEqual({
       klines: remoteKlines,
       source: 'remote',
@@ -103,6 +121,12 @@ describe('KlineService', () => {
     expect(result.klines).toEqual([]);
     expect(result.hasMore).toBe(false);
     expect(mockDb.saveKlines).not.toHaveBeenCalled();
+    expect(syncStateMock.recordHistorySyncError).toHaveBeenCalledWith(
+      'binance',
+      'BTCUSDT',
+      '1h',
+      expect.any(Error),
+    );
   });
 
   it('loops upstream history requests until the requested bar count is satisfied', async () => {
@@ -134,6 +158,33 @@ describe('KlineService', () => {
     expect(mockDb.getKlines).toHaveBeenCalledWith('binance', 'BTCUSDT', '1h', 3, 3000);
     expect(result.klines.map((item) => item.open_time)).toEqual([1000, 2000]);
     expect(binanceAdapterMock.getKlines).toHaveBeenCalledWith('BTCUSDT', '1h', 3, 3000);
+    expect(result.hasMore).toBe(false);
+  });
+
+  it('clears persisted hasMore when upstream confirms there is no older history', async () => {
+    mockDb.getKlineSyncState.mockResolvedValue({
+      exchange: 'binance',
+      symbol: 'BTCUSDT',
+      interval: '1h',
+      earliest_open_time: 1000,
+      latest_open_time: 2000,
+      has_more_history: true,
+    });
+    mockDb.getKlines.mockResolvedValue([makeKline(1000), makeKline(2000)]);
+    binanceAdapterMock.getKlines.mockResolvedValue([]);
+
+    const service = new KlineService();
+
+    const result = await service.getKlines('binance', 'BTCUSDT', '1h', 2, 3000);
+
+    expect(syncStateMock.recordHistorySyncSuccess).toHaveBeenCalledWith(
+      'binance',
+      'BTCUSDT',
+      '1h',
+      [makeKline(1000), makeKline(2000)],
+      false,
+      'binance',
+    );
     expect(result.hasMore).toBe(false);
   });
 

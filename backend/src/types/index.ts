@@ -31,6 +31,56 @@ export interface SymbolInfo {
   status: string;
 }
 
+export interface KlineSyncState {
+  exchange: string;
+  symbol: string;
+  interval: string;
+  earliest_open_time: number | null;
+  latest_open_time: number | null;
+  has_more_history: boolean;
+  last_history_sync_at: string | Date | null;
+  last_realtime_sync_at: string | Date | null;
+  last_history_error: string | null;
+  last_realtime_error: string | null;
+  source: string | null;
+  created_at: string | Date;
+  updated_at: string | Date;
+}
+
+export interface KlineSyncStateUpdate {
+  exchange: string;
+  symbol: string;
+  interval: string;
+  earliest_open_time?: number | null;
+  latest_open_time?: number | null;
+  has_more_history?: boolean;
+  last_history_sync_at?: string | Date | null;
+  last_realtime_sync_at?: string | Date | null;
+  last_history_error?: string | null;
+  last_realtime_error?: string | null;
+  source?: string | null;
+}
+
+export interface SymbolSyncState {
+  exchange: string;
+  type: string;
+  status: string;
+  symbol_count: number;
+  last_sync_at: string | Date | null;
+  last_error: string | null;
+  created_at: string | Date;
+  updated_at: string | Date;
+}
+
+export interface SymbolSyncStateUpdate {
+  exchange: string;
+  type: string;
+  status?: string;
+  symbol_count?: number;
+  last_sync_at?: string | Date | null;
+  last_error?: string | null;
+}
+
 export interface TradeTick {
   exchange: string;
   symbol: string;

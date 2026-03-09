@@ -2,6 +2,7 @@ import { db } from '../database/postgres.js';
 import { BinanceAdapter } from '../exchanges/binance.js';
 import { OKXAdapter } from '../exchanges/okx.js';
 import type { ExchangeAdapter, Kline, KlineQueryResult } from '../types/index.js';
+import { syncStateService } from './sync-state.service.js';
 
 const DEFAULT_INITIAL_KLINE_LIMIT = 2000;
 
@@ -23,6 +24,7 @@ export class KlineService {
     before?: number,
   ): Promise<KlineQueryResult> {
     const requestLimit = limit + 1;
+    const syncState = await db.getKlineSyncState(exchange, symbol, interval);
     const cached = normalizeKlines(
       await db.getKlines(exchange, symbol, interval, requestLimit, before) as Kline[],
     );
@@ -58,6 +60,14 @@ export class KlineService {
 
       if (remoteKlines.length > 0) {
         await this.saveKlines(remoteKlines);
+        await syncStateService.recordHistorySyncSuccess(
+          exchange,
+          symbol,
+          interval,
+          mergedKlines,
+          hasMore,
+          exchange,
+        );
         return {
           klines: responseKlines,
           source: responseKlines.length === cached.length ? 'cache' : 'remote',
@@ -65,10 +75,19 @@ export class KlineService {
         };
       }
 
-      return this.buildFallbackResult(cached, limit);
+      await syncStateService.recordHistorySyncSuccess(
+        exchange,
+        symbol,
+        interval,
+        cached,
+        false,
+        exchange,
+      );
+      return this.buildFallbackResult(cached, limit, false);
     } catch (error: any) {
       console.error('Failed to load remote klines:', error.message);
-      return this.buildFallbackResult(cached, limit);
+      await syncStateService.recordHistorySyncError(exchange, symbol, interval, error);
+      return this.buildFallbackResult(cached, limit, syncState?.has_more_history ?? false);
     }
   }
 
@@ -101,8 +120,8 @@ export class KlineService {
     return db.getSymbols(exchange, type);
   }
 
-  private buildFallbackResult(cached: Kline[], limit: number): KlineQueryResult {
-    const hasMore = cached.length > limit;
+  private buildFallbackResult(cached: Kline[], limit: number, persistedHasMore: boolean = false): KlineQueryResult {
+    const hasMore = cached.length > limit || persistedHasMore;
     const klines = cached.slice(-limit);
 
     if (cached.length > 0) {

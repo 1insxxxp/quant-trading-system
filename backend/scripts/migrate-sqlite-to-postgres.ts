@@ -110,7 +110,13 @@ async function main() {
       console.log(`Migrated ${migratedKlines} klines...`);
     }
 
-    console.log(`Migration complete: ${symbols.length} symbols, ${migratedKlines} klines`);
+    const symbolSyncStates = await postgresDb.backfillSymbolSyncState();
+    const klineSyncStates = await postgresDb.backfillKlineSyncState();
+
+    console.log(
+      `Migration complete: ${symbols.length} symbols, ${migratedKlines} klines, ` +
+      `${symbolSyncStates} symbol sync states, ${klineSyncStates} kline sync states`,
+    );
   } finally {
     sqliteDb.close();
     await postgresDb.close();

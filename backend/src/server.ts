@@ -4,6 +4,7 @@ import { db } from './database/postgres.js';
 import { BinanceAdapter } from './exchanges/binance.js';
 import { OKXAdapter } from './exchanges/okx.js';
 import { klineService } from './services/kline.service.js';
+import { syncStateService } from './services/sync-state.service.js';
 import { WebSocketService } from './services/websocket.service.js';
 import { runStartupSequence } from './startup/startup.js';
 
@@ -101,14 +102,26 @@ async function initExchangeData() {
     await db.ready();
 
     const binanceAdapter = new BinanceAdapter();
-    const binanceSymbols = await binanceAdapter.getSymbols();
-    await Promise.all(binanceSymbols.map((symbol) => db.saveSymbol(symbol)));
-    console.log(`Binance symbols loaded: ${binanceSymbols.length}`);
+    try {
+      const binanceSymbols = await binanceAdapter.getSymbols();
+      await Promise.all(binanceSymbols.map((symbol) => db.saveSymbol(symbol)));
+      await syncStateService.recordSymbolSyncSuccess('binance', 'spot', binanceSymbols.length);
+      console.log(`Binance symbols loaded: ${binanceSymbols.length}`);
+    } catch (error: any) {
+      await syncStateService.recordSymbolSyncError('binance', 'spot', error);
+      throw error;
+    }
 
     const okxAdapter = new OKXAdapter();
-    const okxSymbols = await okxAdapter.getSymbols();
-    await Promise.all(okxSymbols.map((symbol) => db.saveSymbol(symbol)));
-    console.log(`OKX symbols loaded: ${okxSymbols.length}`);
+    try {
+      const okxSymbols = await okxAdapter.getSymbols();
+      await Promise.all(okxSymbols.map((symbol) => db.saveSymbol(symbol)));
+      await syncStateService.recordSymbolSyncSuccess('okx', 'spot', okxSymbols.length);
+      console.log(`OKX symbols loaded: ${okxSymbols.length}`);
+    } catch (error: any) {
+      await syncStateService.recordSymbolSyncError('okx', 'spot', error);
+      throw error;
+    }
 
     console.log('Preloading historical klines...');
 

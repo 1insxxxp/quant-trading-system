@@ -1,4 +1,10 @@
 import { Pool, type QueryResult } from 'pg';
+import type {
+  KlineSyncState,
+  KlineSyncStateUpdate,
+  SymbolSyncState,
+  SymbolSyncStateUpdate,
+} from '../types/index.js';
 
 const DB_CONFIG = {
   host: process.env.DB_HOST || '127.0.0.1',
@@ -71,6 +77,39 @@ export class DatabaseService {
       `);
 
       await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS kline_sync_state (
+          exchange TEXT NOT NULL,
+          symbol TEXT NOT NULL,
+          interval TEXT NOT NULL,
+          earliest_open_time BIGINT,
+          latest_open_time BIGINT,
+          has_more_history BOOLEAN NOT NULL DEFAULT false,
+          last_history_sync_at TIMESTAMPTZ,
+          last_realtime_sync_at TIMESTAMPTZ,
+          last_history_error TEXT,
+          last_realtime_error TEXT,
+          source TEXT,
+          created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY(exchange, symbol, interval)
+        )
+      `);
+
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS symbol_sync_state (
+          exchange TEXT NOT NULL,
+          type TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'idle',
+          symbol_count INTEGER NOT NULL DEFAULT 0,
+          last_sync_at TIMESTAMPTZ,
+          last_error TEXT,
+          created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY(exchange, type)
+        )
+      `);
+
+      await this.pool.query(`
         CREATE INDEX IF NOT EXISTS idx_klines_exchange_symbol ON klines(exchange, symbol)
       `);
       await this.pool.query(`
@@ -81,6 +120,12 @@ export class DatabaseService {
       `);
       await this.pool.query(`
         CREATE INDEX IF NOT EXISTS idx_klines_composite ON klines(exchange, symbol, interval, open_time DESC)
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_kline_sync_state_latest ON kline_sync_state(exchange, symbol, interval, latest_open_time DESC)
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_symbol_sync_state_status ON symbol_sync_state(exchange, type, status)
       `);
 
       console.log('PostgreSQL database initialized');
@@ -309,6 +354,173 @@ export class DatabaseService {
     await this.query(query, params);
   }
 
+  async getKlineSyncState(
+    exchange: string,
+    symbol: string,
+    interval: string,
+  ): Promise<KlineSyncState | null> {
+    const result = await this.query(
+      `
+        SELECT *
+        FROM kline_sync_state
+        WHERE exchange = $1 AND symbol = $2 AND interval = $3
+      `,
+      [exchange, symbol, interval],
+    );
+
+    return result.rows[0] ? mapKlineSyncState(result.rows[0]) : null;
+  }
+
+  async upsertKlineSyncState(update: KlineSyncStateUpdate): Promise<void> {
+    const current = await this.getKlineSyncState(update.exchange, update.symbol, update.interval);
+    const next = {
+      exchange: update.exchange,
+      symbol: update.symbol,
+      interval: update.interval,
+      earliest_open_time: update.earliest_open_time !== undefined ? update.earliest_open_time : current?.earliest_open_time ?? null,
+      latest_open_time: update.latest_open_time !== undefined ? update.latest_open_time : current?.latest_open_time ?? null,
+      has_more_history: update.has_more_history !== undefined ? update.has_more_history : current?.has_more_history ?? false,
+      last_history_sync_at: update.last_history_sync_at !== undefined ? update.last_history_sync_at : current?.last_history_sync_at ?? null,
+      last_realtime_sync_at: update.last_realtime_sync_at !== undefined ? update.last_realtime_sync_at : current?.last_realtime_sync_at ?? null,
+      last_history_error: update.last_history_error !== undefined ? update.last_history_error : current?.last_history_error ?? null,
+      last_realtime_error: update.last_realtime_error !== undefined ? update.last_realtime_error : current?.last_realtime_error ?? null,
+      source: update.source !== undefined ? update.source : current?.source ?? null,
+    };
+
+    await this.query(
+      `
+        INSERT INTO kline_sync_state (
+          exchange, symbol, interval, earliest_open_time, latest_open_time,
+          has_more_history, last_history_sync_at, last_realtime_sync_at,
+          last_history_error, last_realtime_error, source
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        ON CONFLICT (exchange, symbol, interval)
+        DO UPDATE SET
+          earliest_open_time = EXCLUDED.earliest_open_time,
+          latest_open_time = EXCLUDED.latest_open_time,
+          has_more_history = EXCLUDED.has_more_history,
+          last_history_sync_at = EXCLUDED.last_history_sync_at,
+          last_realtime_sync_at = EXCLUDED.last_realtime_sync_at,
+          last_history_error = EXCLUDED.last_history_error,
+          last_realtime_error = EXCLUDED.last_realtime_error,
+          source = EXCLUDED.source,
+          updated_at = CURRENT_TIMESTAMP
+      `,
+      [
+        next.exchange,
+        next.symbol,
+        next.interval,
+        next.earliest_open_time,
+        next.latest_open_time,
+        next.has_more_history,
+        next.last_history_sync_at,
+        next.last_realtime_sync_at,
+        next.last_history_error,
+        next.last_realtime_error,
+        next.source,
+      ],
+    );
+  }
+
+  async getSymbolSyncState(exchange: string, type: string): Promise<SymbolSyncState | null> {
+    const result = await this.query(
+      `
+        SELECT *
+        FROM symbol_sync_state
+        WHERE exchange = $1 AND type = $2
+      `,
+      [exchange, type],
+    );
+
+    return result.rows[0] ? mapSymbolSyncState(result.rows[0]) : null;
+  }
+
+  async upsertSymbolSyncState(update: SymbolSyncStateUpdate): Promise<void> {
+    const current = await this.getSymbolSyncState(update.exchange, update.type);
+    const next = {
+      exchange: update.exchange,
+      type: update.type,
+      status: update.status !== undefined ? update.status : current?.status ?? 'idle',
+      symbol_count: update.symbol_count !== undefined ? update.symbol_count : current?.symbol_count ?? 0,
+      last_sync_at: update.last_sync_at !== undefined ? update.last_sync_at : current?.last_sync_at ?? null,
+      last_error: update.last_error !== undefined ? update.last_error : current?.last_error ?? null,
+    };
+
+    await this.query(
+      `
+        INSERT INTO symbol_sync_state (
+          exchange, type, status, symbol_count, last_sync_at, last_error
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (exchange, type)
+        DO UPDATE SET
+          status = EXCLUDED.status,
+          symbol_count = EXCLUDED.symbol_count,
+          last_sync_at = EXCLUDED.last_sync_at,
+          last_error = EXCLUDED.last_error,
+          updated_at = CURRENT_TIMESTAMP
+      `,
+      [
+        next.exchange,
+        next.type,
+        next.status,
+        next.symbol_count,
+        next.last_sync_at,
+        next.last_error,
+      ],
+    );
+  }
+
+  async backfillKlineSyncState(): Promise<number> {
+    const result = await this.query(`
+      SELECT
+        exchange,
+        symbol,
+        interval,
+        MIN(open_time) AS earliest_open_time,
+        MAX(open_time) AS latest_open_time
+      FROM klines
+      GROUP BY exchange, symbol, interval
+      ORDER BY exchange, symbol, interval
+    `);
+
+    for (const row of result.rows) {
+      await this.upsertKlineSyncState({
+        exchange: String(row.exchange),
+        symbol: String(row.symbol),
+        interval: String(row.interval),
+        earliest_open_time: Number(row.earliest_open_time),
+        latest_open_time: Number(row.latest_open_time),
+        has_more_history: true,
+        source: String(row.exchange),
+      });
+    }
+
+    return result.rows.length;
+  }
+
+  async backfillSymbolSyncState(): Promise<number> {
+    const result = await this.query(`
+      SELECT
+        exchange,
+        type,
+        COUNT(*)::INTEGER AS symbol_count
+      FROM symbols
+      GROUP BY exchange, type
+      ORDER BY exchange, type
+    `);
+
+    for (const row of result.rows) {
+      await this.upsertSymbolSyncState({
+        exchange: String(row.exchange),
+        type: String(row.type),
+        status: 'idle',
+        symbol_count: Number(row.symbol_count),
+      });
+    }
+
+    return result.rows.length;
+  }
+
   async close(): Promise<void> {
     await this.pool.end();
   }
@@ -330,3 +542,34 @@ function shouldCreateDefaultDatabaseService() {
 export const db = (
   shouldCreateDefaultDatabaseService() ? new DatabaseService() : null
 ) as unknown as DatabaseService;
+
+function mapKlineSyncState(row: Record<string, unknown>): KlineSyncState {
+  return {
+    exchange: String(row.exchange),
+    symbol: String(row.symbol),
+    interval: String(row.interval),
+    earliest_open_time: row.earliest_open_time == null ? null : Number(row.earliest_open_time),
+    latest_open_time: row.latest_open_time == null ? null : Number(row.latest_open_time),
+    has_more_history: Boolean(row.has_more_history),
+    last_history_sync_at: (row.last_history_sync_at as string | Date | null) ?? null,
+    last_realtime_sync_at: (row.last_realtime_sync_at as string | Date | null) ?? null,
+    last_history_error: (row.last_history_error as string | null) ?? null,
+    last_realtime_error: (row.last_realtime_error as string | null) ?? null,
+    source: (row.source as string | null) ?? null,
+    created_at: row.created_at as string | Date,
+    updated_at: row.updated_at as string | Date,
+  };
+}
+
+function mapSymbolSyncState(row: Record<string, unknown>): SymbolSyncState {
+  return {
+    exchange: String(row.exchange),
+    type: String(row.type),
+    status: String(row.status),
+    symbol_count: Number(row.symbol_count),
+    last_sync_at: (row.last_sync_at as string | Date | null) ?? null,
+    last_error: (row.last_error as string | null) ?? null,
+    created_at: row.created_at as string | Date,
+    updated_at: row.updated_at as string | Date,
+  };
+}

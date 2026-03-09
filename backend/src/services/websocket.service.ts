@@ -4,6 +4,7 @@ import { OKXAdapter } from '../exchanges/okx.js';
 import type { ExchangeAdapter, Kline, WsMessage } from '../types/index.js';
 import { klineService } from './kline.service.js';
 import { MarketTradeStream } from './market-trade-stream.js';
+import { syncStateService } from './sync-state.service.js';
 
 interface MarketStreamEntry {
   exchange: string;
@@ -186,9 +187,14 @@ export class WebSocketService {
     const subscriptionKey = this.getSubscriptionKey(exchange, symbol, interval);
     const subscribers = this.subscriptions.get(subscriptionKey);
 
-    void klineService.saveKline(kline).catch((error) => {
-      console.error('Failed to persist realtime kline:', error);
-    });
+    void klineService.saveKline(kline)
+      .then(async () => {
+        await syncStateService.recordRealtimeSyncSuccess(kline);
+      })
+      .catch(async (error) => {
+        console.error('Failed to persist realtime kline:', error);
+        await syncStateService.recordRealtimeSyncError(kline, error);
+      });
 
     if (!subscribers || subscribers.size === 0) {
       return;
