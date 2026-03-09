@@ -7,9 +7,15 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': {
+      '/quant/api': {
         target: 'http://localhost:4000',
         changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/quant/, ''),
+      },
+      '/quant/ws': {
+        target: 'ws://localhost:4001',
+        changeOrigin: true,
+        ws: true,
       },
     },
   },

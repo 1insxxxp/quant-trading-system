@@ -1,14 +1,16 @@
 import axios from 'axios';
 import WebSocket from 'ws';
-import type { ExchangeAdapter, Kline, SymbolInfo } from '../types/index.js';
+import { createProxyAgent } from '../network/proxy.js';
+import type { ExchangeAdapter, Kline, SymbolInfo, TradeTick } from '../types/index.js';
 
 export class OKXAdapter implements ExchangeAdapter {
-  private baseUrl = 'https://www.okx.com';
-  private wsUrl = 'wss://ws.okx.com:8443/ws/v5/public';
-  private wsConnections: Map<string, WebSocket> = new Map();
+  private readonly baseUrl = 'https://www.okx.com';
+  private readonly wsUrl = 'wss://ws.okx.com:8443/ws/v5/public';
+  private readonly requestTimeoutMs = Number(process.env.EXCHANGE_REQUEST_TIMEOUT_MS ?? 2500);
+  private readonly proxyAgent = createProxyAgent();
+  private readonly wsConnections: Map<string, WebSocket> = new Map();
 
-  // OKX API 使用大写周期格式
-  private intervalMap: Record<string, string> = {
+  private readonly intervalMap: Record<string, string> = {
     '1m': '1m',
     '5m': '5m',
     '15m': '15m',
@@ -17,34 +19,42 @@ export class OKXAdapter implements ExchangeAdapter {
     '1d': '1D',
   };
 
-  // 获取 K 线数据
-  async getKlines(symbol: string, interval: string, limit: number = 1000): Promise<Kline[]> {
+  async getKlines(
+    symbol: string,
+    interval: string,
+    limit: number = 1000,
+    before?: number,
+  ): Promise<Kline[]> {
     try {
-      // OKX 现货和合约的 instId 格式不同
-      const instId = symbol.toUpperCase(); // BTC-USDT 格式
+      const instId = symbol.toUpperCase();
       const response = await axios.get(`${this.baseUrl}/api/v5/market/candles`, {
         params: {
           instId: instId.replace('USDT', '-USDT'),
           bar: this.intervalMap[interval] || '1H',
           limit: Math.min(limit, 100),
+          ...(typeof before === 'number' ? { after: String(before) } : {}),
         },
+        httpAgent: this.proxyAgent,
+        httpsAgent: this.proxyAgent,
+        proxy: false,
+        timeout: this.requestTimeoutMs,
       });
 
-      return response.data.data.map((k: string[]) => {
-        const openTime = Number(k[0]);
+      return response.data.data.map((item: string[]) => {
+        const openTime = Number(item[0]);
 
         return {
           exchange: 'okx',
           symbol: symbol.toUpperCase(),
-          interval: interval, // 使用传入的 interval，不要用映射
+          interval,
           open_time: openTime,
           close_time: openTime + this.getIntervalMs(interval),
-          open: parseFloat(k[1]),
-          high: parseFloat(k[2]),
-          low: parseFloat(k[3]),
-          close: parseFloat(k[4]),
-          volume: parseFloat(k[5]),
-          quote_volume: parseFloat(k[6]),
+          open: parseFloat(item[1]),
+          high: parseFloat(item[2]),
+          low: parseFloat(item[3]),
+          close: parseFloat(item[4]),
+          volume: parseFloat(item[5]),
+          quote_volume: parseFloat(item[6]),
           trades_count: undefined,
           is_closed: 1,
         };
@@ -55,78 +65,128 @@ export class OKXAdapter implements ExchangeAdapter {
     }
   }
 
-  // 订阅实时 K 线（WebSocket）
+  subscribeTrades(
+    symbol: string,
+    callback: (trade: TradeTick) => void,
+  ): () => void {
+    const instId = symbol.toUpperCase().replace('USDT', '-USDT');
+    const ws = new WebSocket(this.wsUrl, {
+      agent: this.proxyAgent,
+      handshakeTimeout: this.requestTimeoutMs,
+    });
+    const key = `trades:${symbol}`;
+    const pingInterval = this.attachPing(ws);
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({
+        op: 'subscribe',
+        args: [{ channel: 'trades', instId }],
+      }));
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data.toString());
+        if (data.event === 'pong' || !(data.arg?.channel === 'trades')) {
+          return;
+        }
+
+        const trade = data.data?.[0];
+        if (!trade) {
+          return;
+        }
+
+        const price = parseFloat(trade.px);
+        const quantity = parseFloat(trade.sz);
+
+        callback({
+          exchange: 'okx',
+          symbol: symbol.toUpperCase(),
+          price,
+          quantity,
+          quote_volume: price * quantity,
+          timestamp: Number(trade.ts),
+        });
+      } catch (error: any) {
+        console.error('OKX trade parse error:', error.message);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('OKX trade WebSocket error:', error);
+    };
+
+    ws.onclose = () => {
+      clearInterval(pingInterval);
+    };
+
+    this.wsConnections.set(key, ws);
+
+    return () => {
+      clearInterval(pingInterval);
+      ws.close();
+      this.wsConnections.delete(key);
+    };
+  }
+
   subscribeKline(
     symbol: string,
     interval: string,
-    callback: (kline: Kline) => void
+    callback: (kline: Kline) => void,
   ): () => void {
     const instId = symbol.toUpperCase().replace('USDT', '-USDT');
-    const channel = `candle${this.intervalMap[interval] || '1H'}:${instId}`;
-    
-    const ws = new WebSocket(this.wsUrl);
+    const channel = `candle${this.intervalMap[interval] || '1H'}`;
+    const ws = new WebSocket(this.wsUrl, {
+      agent: this.proxyAgent,
+      handshakeTimeout: this.requestTimeoutMs,
+    });
     const key = `kline:${symbol}:${interval}`;
+    const pingInterval = this.attachPing(ws);
 
     ws.onopen = () => {
-      // 订阅
-      const subscribeMsg = {
+      ws.send(JSON.stringify({
         op: 'subscribe',
-        args: [
-          {
-            channel: channel,
-            instId: instId,
-          },
-        ],
-      };
-      ws.send(JSON.stringify(subscribeMsg));
+        args: [{ channel, instId }],
+      }));
     };
 
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data.toString());
-        
-        // 忽略 pong 响应
-        if (data.event === 'pong') return;
-        
-        // 处理 K 线数据
-        if (data.arg && data.arg.channel && data.arg.channel.startsWith('candle')) {
-          const k = data.data[0];
-          if (!k) return;
-          const openTime = Number(k[0]);
-
-          const kline: Kline = {
-            exchange: 'okx',
-            symbol: symbol.toUpperCase(),
-            interval: interval, // 使用传入的 interval
-            open_time: openTime,
-            close_time: openTime + this.getIntervalMs(interval),
-            open: parseFloat(k[1]),
-            high: parseFloat(k[2]),
-            low: parseFloat(k[3]),
-            close: parseFloat(k[4]),
-            volume: parseFloat(k[5]),
-            quote_volume: parseFloat(k[6]),
-            trades_count: undefined,
-            is_closed: 1,
-          };
-
-          callback(kline);
+        if (data.event === 'pong' || !data.arg?.channel?.startsWith('candle')) {
+          return;
         }
+
+        const item = data.data?.[0];
+        if (!item) {
+          return;
+        }
+
+        const openTime = Number(item[0]);
+
+        callback({
+          exchange: 'okx',
+          symbol: symbol.toUpperCase(),
+          interval,
+          open_time: openTime,
+          close_time: openTime + this.getIntervalMs(interval),
+          open: parseFloat(item[1]),
+          high: parseFloat(item[2]),
+          low: parseFloat(item[3]),
+          close: parseFloat(item[4]),
+          volume: parseFloat(item[5]),
+          quote_volume: parseFloat(item[6]),
+          trades_count: undefined,
+          is_closed: 1,
+        });
       } catch (error: any) {
-        console.error('OKX Kline parse error:', error.message);
+        console.error('OKX kline parse error:', error.message);
       }
     };
 
     ws.onerror = (error) => {
-      console.error('OKX WebSocket error:', error);
+      console.error('OKX kline WebSocket error:', error);
     };
-
-    // 心跳
-    const pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send('ping');
-      }
-    }, 30000);
 
     ws.onclose = () => {
       clearInterval(pingInterval);
@@ -141,88 +201,35 @@ export class OKXAdapter implements ExchangeAdapter {
     };
   }
 
-  // 订阅最新价格（WebSocket）
   subscribePrice(
     symbol: string,
-    callback: (price: number) => void
+    callback: (price: number) => void,
   ): () => void {
-    const instId = symbol.toUpperCase().replace('USDT', '-USDT');
-    const channel = `trades:${instId}`;
-    
-    const ws = new WebSocket(this.wsUrl);
-    const key = `price:${symbol}`;
-
-    ws.onopen = () => {
-      const subscribeMsg = {
-        op: 'subscribe',
-        args: [
-          {
-            channel: channel,
-            instId: instId,
-          },
-        ],
-      };
-      ws.send(JSON.stringify(subscribeMsg));
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data.toString());
-        
-        if (data.event === 'pong') return;
-        
-        if (data.arg && data.arg.channel === 'trades') {
-          const trade = data.data[0];
-          if (!trade) return;
-          
-          const price = parseFloat(trade.px);
-          callback(price);
-        }
-      } catch (error: any) {
-        console.error('OKX Price parse error:', error.message);
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error('OKX WebSocket error:', error);
-    };
-
-    const pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send('ping');
-      }
-    }, 30000);
-
-    ws.onclose = () => {
-      clearInterval(pingInterval);
-    };
-
-    this.wsConnections.set(key, ws);
-
-    return () => {
-      clearInterval(pingInterval);
-      ws.close();
-      this.wsConnections.delete(key);
-    };
+    return this.subscribeTrades(symbol, (trade) => {
+      callback(trade.price);
+    });
   }
 
-  // 获取交易对列表
   async getSymbols(): Promise<SymbolInfo[]> {
     try {
       const response = await axios.get(`${this.baseUrl}/api/v5/public/instruments`, {
         params: {
           instType: 'SPOT',
         },
+        httpAgent: this.proxyAgent,
+        httpsAgent: this.proxyAgent,
+        proxy: false,
+        timeout: this.requestTimeoutMs,
       });
 
       return response.data.data
-        .filter((s: any) => s.quoteCcy === 'USDT' && s.state === 'live')
-        .filter((s: any) => ['BTC', 'ETH'].includes(s.baseCcy))
-        .map((s: any) => ({
+        .filter((item: any) => item.quoteCcy === 'USDT' && item.state === 'live')
+        .filter((item: any) => ['BTC', 'ETH'].includes(item.baseCcy))
+        .map((item: any) => ({
           exchange: 'okx',
-          symbol: s.instId.replace('-', ''),
-          base_asset: s.baseCcy,
-          quote_asset: s.quoteCcy,
+          symbol: item.instId.replace('-', ''),
+          base_asset: item.baseCcy,
+          quote_asset: item.quoteCcy,
           type: 'spot',
           status: 'active',
         }));
@@ -232,7 +239,19 @@ export class OKXAdapter implements ExchangeAdapter {
     }
   }
 
-  // 获取时间间隔毫秒数
+  closeAll() {
+    this.wsConnections.forEach((ws) => ws.close());
+    this.wsConnections.clear();
+  }
+
+  private attachPing(ws: WebSocket): ReturnType<typeof setInterval> {
+    return setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send('ping');
+      }
+    }, 30000);
+  }
+
   private getIntervalMs(interval: string): number {
     const map: Record<string, number> = {
       '1m': 60 * 1000,
@@ -242,12 +261,7 @@ export class OKXAdapter implements ExchangeAdapter {
       '4h': 4 * 60 * 60 * 1000,
       '1d': 24 * 60 * 60 * 1000,
     };
-    return map[interval] || 60 * 60 * 1000;
-  }
 
-  // 关闭所有 WebSocket 连接
-  closeAll() {
-    this.wsConnections.forEach((ws) => ws.close());
-    this.wsConnections.clear();
+    return map[interval] || 60 * 60 * 1000;
   }
 }

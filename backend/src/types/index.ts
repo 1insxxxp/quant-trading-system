@@ -1,47 +1,69 @@
-// K 线数据结构
 export interface Kline {
-  exchange: string;      // 'binance' | 'okx'
-  symbol: string;        // 'BTCUSDT' | 'ETHUSDT'
-  interval: string;      // '1m' | '5m' | '15m' | '1h' | '4h' | '1d'
-  open_time: number;     // K 线开始时间（毫秒）
-  close_time: number;    // K 线结束时间（毫秒）
-  open: number;          // 开盘价
-  high: number;          // 最高价
-  low: number;           // 最低价
-  close: number;         // 收盘价
-  volume: number;        // 成交量
-  quote_volume: number;  // 成交额
-  trades_count?: number; // 交易笔数
-  is_closed: number;     // K 线是否关闭（0-未关闭，1-已关闭）
+  exchange: string;
+  symbol: string;
+  interval: string;
+  open_time: number;
+  close_time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  quote_volume: number;
+  trades_count?: number;
+  is_closed: number;
 }
 
-// 交易对信息
+export type KlineSource = 'cache' | 'remote';
+
+export interface KlineQueryResult {
+  klines: Kline[];
+  source: KlineSource;
+  hasMore: boolean;
+}
+
 export interface SymbolInfo {
-  exchange: string;      // 'binance' | 'okx'
-  symbol: string;        // 'BTCUSDT' | 'ETHUSDT'
-  base_asset: string;    // 'BTC' | 'ETH'
-  quote_asset: string;   // 'USDT'
-  type: string;          // 'spot' | 'futures'
-  status: string;        // 'active' | 'delisted'
+  exchange: string;
+  symbol: string;
+  base_asset: string;
+  quote_asset: string;
+  type: string;
+  status: string;
 }
 
-// 交易所适配器接口
+export interface TradeTick {
+  exchange: string;
+  symbol: string;
+  price: number;
+  quantity: number;
+  quote_volume: number;
+  timestamp: number;
+}
+
 export interface ExchangeAdapter {
-  getKlines(symbol: string, interval: string, limit: number): Promise<Kline[]>;
+  getKlines(
+    symbol: string,
+    interval: string,
+    limit: number,
+    before?: number,
+  ): Promise<Kline[]>;
+  subscribeTrades(
+    symbol: string,
+    callback: (trade: TradeTick) => void,
+  ): () => void;
   subscribeKline(
     symbol: string,
     interval: string,
-    callback: (kline: Kline) => void
+    callback: (kline: Kline) => void,
   ): () => void;
   subscribePrice(
     symbol: string,
-    callback: (price: number) => void
+    callback: (price: number) => void,
   ): () => void;
   getSymbols(): Promise<SymbolInfo[]>;
   closeAll?: () => void;
 }
 
-// WebSocket 消息类型
 export interface WsMessage {
   type:
     | 'subscribe'
@@ -59,10 +81,11 @@ export interface WsMessage {
   error?: string;
 }
 
-// API 响应类型
 export interface KlineResponse {
   success: boolean;
   klines?: Kline[];
+  source?: KlineSource;
+  hasMore?: boolean;
   error?: string;
 }
 

@@ -1,60 +1,80 @@
 import React, { useEffect, useRef } from 'react';
-import { createChart, IChartApi, ISeriesApi, CandlestickData } from 'lightweight-charts';
+import {
+  createChart,
+  type CandlestickData,
+  type IChartApi,
+  type ISeriesApi,
+} from 'lightweight-charts';
+import { formatMarketSymbol } from '../lib/marketDisplay';
 import { useMarketStore } from '../stores/marketStore';
+import { Toolbar } from './Toolbar';
+import {
+  buildCandlestickData,
+  resolveChartUpdateMode,
+  shouldLoadOlderKlines,
+} from './klineChartData';
 
 export const KlineChart: React.FC = () => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const previousDataRef = useRef<CandlestickData[]>([]);
-  
-  const { klines, exchange, symbol, interval } = useMarketStore();
+  const previousMarketKeyRef = useRef<string | null>(null);
 
-  // 初始化图表
+  const {
+    klines,
+    klineSource,
+    exchange,
+    symbol,
+    interval,
+    isConnected,
+    isLoadingKlines,
+    isLoadingOlderKlines,
+  } = useMarketStore();
+
   useEffect(() => {
-    if (!chartContainerRef.current) return;
+    if (!chartContainerRef.current) {
+      return;
+    }
 
-    // 创建图表
     const chart = createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth,
-      height: 600,
+      height: 620,
       layout: {
-        background: { color: '#1e222d' },
-        textColor: '#d1d4dc',
+        background: { color: '#ffffff' },
+        textColor: '#425466',
       },
       grid: {
-        vertLines: { color: '#2a2e39' },
-        horzLines: { color: '#2a2e39' },
+        vertLines: { color: '#edf1f5' },
+        horzLines: { color: '#edf1f5' },
       },
       crosshair: {
         mode: 1,
       },
       timeScale: {
-        borderColor: '#2a2e39',
+        borderColor: '#dce3ea',
         timeVisible: true,
         secondsVisible: false,
       },
       rightPriceScale: {
-        borderColor: '#2a2e39',
+        borderColor: '#dce3ea',
       },
     });
 
-    // 创建 K 线系列
     const candleSeries = chart.addCandlestickSeries({
-      upColor: '#26a69a',
-      downColor: '#ef5350',
+      upColor: '#0ea765',
+      downColor: '#e15656',
       borderVisible: false,
-      wickUpColor: '#26a69a',
-      wickDownColor: '#ef5350',
+      wickUpColor: '#0ea765',
+      wickDownColor: '#e15656',
     });
 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     previousDataRef.current = [];
 
-    // 响应式调整大小
     const handleResize = () => {
-      if (chartContainerRef.current && chart) {
+      if (chartContainerRef.current) {
         chart.applyOptions({
           width: chartContainerRef.current.clientWidth,
         });
@@ -63,97 +83,135 @@ export const KlineChart: React.FC = () => {
 
     window.addEventListener('resize', handleResize);
 
+    const handleVisibleRangeChange = (range: { from: number; to: number } | null) => {
+      if (
+        shouldLoadOlderKlines({
+          visibleFrom: range?.from,
+          isLoadingOlderKlines: useMarketStore.getState().isLoadingOlderKlines,
+          hasMoreHistoricalKlines: useMarketStore.getState().hasMoreHistoricalKlines,
+        })
+      ) {
+        void useMarketStore.getState().loadOlderKlines();
+      }
+    };
+
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange as never);
+
     return () => {
       window.removeEventListener('resize', handleResize);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange as never);
       previousDataRef.current = [];
       chart.remove();
     };
   }, []);
 
-  // 更新 K 线数据
   useEffect(() => {
     if (!candleSeriesRef.current) {
-      console.warn('⚠️ 图表系列未初始化');
       return;
     }
 
-    console.log(`📊 更新图表数据：${exchange} ${symbol} ${interval}, K 线数量：${klines.length}`);
+    const marketKey = `${exchange}:${symbol}:${interval}`;
 
     if (klines.length === 0) {
-      console.log('⚠️ 数据为空，清空图表');
       candleSeriesRef.current.setData([]);
+      previousDataRef.current = [];
+      previousMarketKeyRef.current = marketKey;
       return;
     }
 
-    // 转换数据格式
-    const data: CandlestickData[] = klines.map((k) => ({
-      time: (k.open_time / 1000) as any,
-      open: k.open,
-      high: k.high,
-      low: k.low,
-      close: k.close,
-    }));
+    const data = buildCandlestickData(klines);
 
     const previousData = previousDataRef.current;
-    const previousLast = previousData[previousData.length - 1];
     const nextLast = data[data.length - 1];
+    const updateMode = resolveChartUpdateMode({
+      previousData,
+      nextData: data,
+      previousMarketKey: previousMarketKeyRef.current,
+      nextMarketKey: marketKey,
+    });
 
-    console.log(`📈 设置图表数据，第一条：${data[0].time}, 最后一条：${nextLast.time}`);
-
-    if (previousData.length === 0) {
+    if (updateMode === 'replace') {
       candleSeriesRef.current.setData(data);
       chartRef.current?.timeScale().fitContent();
-    } else if (
-      previousData.length === data.length &&
-      previousLast?.time === nextLast.time
-    ) {
-      candleSeriesRef.current.update(nextLast);
-    } else if (previousData.length + 1 === data.length) {
-      candleSeriesRef.current.update(nextLast);
-      chartRef.current?.timeScale().scrollToRealTime();
-    } else {
+    } else if (updateMode === 'prepend') {
+      const visibleRange = chartRef.current?.timeScale().getVisibleLogicalRange();
+      const prependedCount = data.length - previousData.length;
+
       candleSeriesRef.current.setData(data);
-      chartRef.current?.timeScale().fitContent();
+
+      if (visibleRange && chartRef.current) {
+        chartRef.current.timeScale().setVisibleLogicalRange({
+          from: visibleRange.from + prependedCount,
+          to: visibleRange.to + prependedCount,
+        });
+      }
+    } else if (nextLast) {
+      candleSeriesRef.current.update(nextLast);
+
+      if (updateMode === 'append') {
+        chartRef.current?.timeScale().scrollToRealTime();
+      }
     }
 
     previousDataRef.current = data;
-    console.log('✅ 图表数据已更新');
-  }, [klines, exchange, symbol, interval]); // 所有依赖都加上
+    previousMarketKeyRef.current = marketKey;
+  }, [klines, exchange, symbol, interval]);
 
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>
-        <span style={styles.title}>
-          {exchange.toUpperCase()} - {symbol} - {interval}
-        </span>
-      </div>
-      <div
-        ref={chartContainerRef}
-        data-testid="kline-chart"
-        style={styles.chartContainer}
-      />
-    </div>
-  );
-};
+    <section className="chart-panel">
+      <div className="chart-panel__terminal-bar">
+        <div className="chart-panel__market">
+          <span className="chart-panel__market-label">市场</span>
+          <strong className="chart-panel__market-title">
+            {exchange.toUpperCase()} / {formatMarketSymbol(symbol)}
+          </strong>
+        </div>
 
-const styles: { [key: string]: React.CSSProperties } = {
-  container: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    backgroundColor: '#1e222d',
-  },
-  header: {
-    padding: '12px 16px',
-    borderBottom: '1px solid #2a2e39',
-  },
-  title: {
-    fontSize: '16px',
-    fontWeight: 600,
-    color: '#d1d4dc',
-  },
-  chartContainer: {
-    flex: 1,
-    position: 'relative',
-  },
+        <div className="chart-panel__controls chart-panel__controls--terminal">
+          <Toolbar />
+        </div>
+
+        <div className="chart-badges chart-badges--terminal">
+          <span className="chart-badge">{interval}</span>
+          <span className="chart-badge">{klines.length} 根</span>
+          <span className={`chart-badge chart-badge--${klineSource}`}>
+            {klineSource === 'cache' ? '缓存' : '实时'}
+          </span>
+          <span className={`chart-badge chart-badge--${isConnected ? 'live' : 'waiting'}`}>
+            {isConnected ? '推送中' : '等待中'}
+          </span>
+        </div>
+      </div>
+
+      <div className={`chart-panel__body ${isLoadingKlines ? 'chart-panel__body--loading' : ''}`}>
+        {isLoadingOlderKlines && !isLoadingKlines ? (
+          <div className="chart-history-status" role="status" aria-live="polite">
+            <span className="chart-history-status__dot" aria-hidden="true" />
+            <span>正在加载更早的历史 K 线</span>
+          </div>
+        ) : null}
+
+        <div
+          ref={chartContainerRef}
+          data-testid="kline-chart"
+          className={`chart-canvas ${isLoadingKlines ? 'chart-canvas--dimmed' : ''}`}
+        />
+
+        {isLoadingKlines ? (
+          <div className="chart-overlay chart-overlay--loading">
+            <span className="chart-spinner" aria-hidden="true" />
+            <strong>正在加载 K 线数据</strong>
+            <span>切换已经生效，新的历史数据返回后会自动替换当前图表。</span>
+          </div>
+        ) : null}
+
+        {!isLoadingKlines && klines.length === 0 ? (
+          <div className="chart-overlay">
+            <strong>等待市场数据</strong>
+            <span>当前筛选条件下还没有可用 K 线，请稍后重试或切换市场。</span>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
 };

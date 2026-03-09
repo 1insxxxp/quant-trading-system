@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useMarketStore } from '../stores/marketStore';
 
 const EXCHANGES = [
@@ -6,102 +6,89 @@ const EXCHANGES = [
   { value: 'okx', label: 'OKX' },
 ];
 
-const SYMBOLS = [
-  { value: 'BTCUSDT', label: 'BTC/USDT' },
-  { value: 'ETHUSDT', label: 'ETH/USDT' },
-];
-
 const INTERVALS = [
-  { value: '1m', label: '1 分钟' },
-  { value: '5m', label: '5 分钟' },
-  { value: '15m', label: '15 分钟' },
-  { value: '1h', label: '1 小时' },
-  { value: '4h', label: '4 小时' },
-  { value: '1d', label: '1 天' },
+  { value: '1m', label: '1m' },
+  { value: '5m', label: '5m' },
+  { value: '15m', label: '15m' },
+  { value: '1h', label: '1h' },
+  { value: '4h', label: '4h' },
+  { value: '1d', label: '1d' },
 ];
 
 export const Toolbar: React.FC = () => {
-  const { exchange, symbol, interval, setExchange, setSymbol, setInterval } = useMarketStore();
+  const {
+    exchange,
+    symbol,
+    interval,
+    symbols,
+    isLoadingSymbols,
+    setExchange,
+    setSymbol,
+    setInterval,
+    fetchSymbols,
+  } = useMarketStore();
+
+  useEffect(() => {
+    void fetchSymbols();
+  }, [fetchSymbols]);
+
+  const symbolOptions = symbols.length > 0
+    ? symbols
+    : [{ value: '', label: isLoadingSymbols ? '加载中...' : '暂无交易对' }];
 
   return (
-    <div style={styles.toolbar}>
-      <div style={styles.controlGroup}>
-        <label style={styles.label}>交易所</label>
+    <div className="toolbar-inline toolbar-inline--terminal">
+      <div className="toolbar-field toolbar-field--terminal">
+        <label className="toolbar-label" htmlFor="exchange-select">交易所</label>
         <select
+          id="exchange-select"
           value={exchange}
-          onChange={(e) => setExchange(e.target.value)}
-          style={styles.select}
+          onChange={(event) => setExchange(event.target.value)}
+          className="toolbar-select toolbar-select--terminal"
           data-testid="exchange-select"
         >
-          {EXCHANGES.map((ex) => (
-            <option key={ex.value} value={ex.value}>
-              {ex.label}
+          {EXCHANGES.map((exchangeOption) => (
+            <option key={exchangeOption.value} value={exchangeOption.value}>
+              {exchangeOption.label}
             </option>
           ))}
         </select>
       </div>
 
-      <div style={styles.controlGroup}>
-        <label style={styles.label}>交易对</label>
+      <div className="toolbar-field toolbar-field--terminal">
+        <label className="toolbar-label" htmlFor="symbol-select">交易对</label>
         <select
+          id="symbol-select"
           value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          style={styles.select}
+          onChange={(event) => setSymbol(event.target.value)}
+          className="toolbar-select toolbar-select--terminal"
           data-testid="symbol-select"
+          disabled={symbolOptions.length === 0 || symbolOptions[0].value === ''}
         >
-          {SYMBOLS.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}
+          {symbolOptions.map((symbolOption) => (
+            <option key={symbolOption.value || 'empty'} value={symbolOption.value}>
+              {symbolOption.label}
             </option>
           ))}
         </select>
       </div>
 
-      <div style={styles.controlGroup}>
-        <label style={styles.label}>周期</label>
+      <div className="toolbar-field toolbar-field--terminal">
+        <label className="toolbar-label" htmlFor="interval-select">周期</label>
         <select
+          id="interval-select"
           value={interval}
-          onChange={(e) => setInterval(e.target.value)}
-          style={styles.select}
+          onChange={(event) => setInterval(event.target.value)}
+          className="toolbar-select toolbar-select--terminal"
           data-testid="interval-select"
         >
-          {INTERVALS.map((i) => (
-            <option key={i.value} value={i.value}>
-              {i.label}
+          {INTERVALS.map((intervalOption) => (
+            <option key={intervalOption.value} value={intervalOption.value}>
+              {intervalOption.label}
             </option>
           ))}
         </select>
       </div>
     </div>
   );
-};
-
-const styles: { [key: string]: React.CSSProperties } = {
-  toolbar: {
-    display: 'flex',
-    gap: '20px',
-    padding: '16px',
-    backgroundColor: '#1e222d',
-    borderBottom: '1px solid #2a2e39',
-  },
-  controlGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  label: {
-    fontSize: '12px',
-    color: '#787b86',
-    fontWeight: 500,
-  },
-  select: {
-    padding: '8px 12px',
-    fontSize: '14px',
-    backgroundColor: '#2a2e39',
-    color: '#d1d4dc',
-    border: '1px solid #363a45',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    minWidth: '120px',
-  },
 };

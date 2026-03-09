@@ -1,37 +1,128 @@
 import { create } from 'zustand';
-import type { MarketState, Kline } from '../types/index.js';
+import { formatMarketSymbol } from '../lib/marketDisplay.js';
+import type { Kline, KlineSource, MarketState, SymbolOption } from '../types/index.js';
 
 let latestFetchToken = 0;
+export const MARKET_SELECTION_STORAGE_KEY = 'quant-market-selection';
+
+const DEFAULT_SYMBOLS: SymbolOption[] = [
+  { value: 'BTCUSDT', label: 'BTC/USDT' },
+  { value: 'ETHUSDT', label: 'ETH/USDT' },
+];
+
+const DEFAULT_MARKET_SELECTION = {
+  exchange: 'binance',
+  symbol: 'BTCUSDT',
+  interval: '1h',
+} as const;
+const INITIAL_KLINE_LIMIT = 2000;
+const OLDER_KLINE_PAGE_SIZE = 1000;
+
+interface BackendSymbol {
+  exchange?: string;
+  symbol: string;
+  base_asset?: string;
+  quote_asset?: string;
+  type?: string;
+}
+
+interface BackendKlineResponse {
+  success: boolean;
+  klines?: Kline[];
+  source?: Exclude<KlineSource, 'empty'>;
+  hasMore?: boolean;
+  error?: string;
+}
+
+interface BackendSymbolsResponse {
+  success: boolean;
+  symbols?: BackendSymbol[];
+  error?: string;
+}
 
 export function getMarketKey(exchange: string, symbol: string, interval: string): string {
   return `${exchange}:${symbol}:${interval}`;
 }
 
+const initialSelection = readPersistedMarketSelection();
+
 export const useMarketStore = create<MarketState>((set, get) => ({
-  exchange: 'binance',
-  symbol: 'BTCUSDT',
-  interval: '1h',
+  exchange: initialSelection.exchange,
+  symbol: initialSelection.symbol,
+  interval: initialSelection.interval,
   klines: [],
+  klineSource: 'empty',
   latestPrice: null,
   isConnected: false,
+  symbols: DEFAULT_SYMBOLS,
+  isLoadingSymbols: false,
+  isLoadingKlines: false,
+  isLoadingOlderKlines: false,
+  hasMoreHistoricalKlines: true,
 
   setExchange: (exchange: string) => {
-    set({ exchange, klines: [], latestPrice: null });
-    void get().fetchKlines();
+    set((state) => {
+      writePersistedMarketSelection({
+        exchange,
+        symbol: state.symbol,
+        interval: state.interval,
+      });
+
+      return {
+        exchange,
+        latestPrice: null,
+        isLoadingKlines: true,
+        isLoadingOlderKlines: false,
+        hasMoreHistoricalKlines: true,
+      };
+    });
+    void get().fetchSymbols();
   },
 
   setSymbol: (symbol: string) => {
-    set({ symbol, klines: [], latestPrice: null });
-    void get().fetchKlines();
+    set((state) => {
+      writePersistedMarketSelection({
+        exchange: state.exchange,
+        symbol,
+        interval: state.interval,
+      });
+
+      return {
+        symbol,
+        latestPrice: null,
+        isLoadingKlines: true,
+        isLoadingOlderKlines: false,
+        hasMoreHistoricalKlines: true,
+      };
+    });
+    void get().loadInitialKlines();
   },
 
   setInterval: (interval: string) => {
-    set({ interval, klines: [], latestPrice: null });
-    void get().fetchKlines();
+    set((state) => {
+      writePersistedMarketSelection({
+        exchange: state.exchange,
+        symbol: state.symbol,
+        interval,
+      });
+
+      return {
+        interval,
+        latestPrice: null,
+        isLoadingKlines: true,
+        isLoadingOlderKlines: false,
+        hasMoreHistoricalKlines: true,
+      };
+    });
+    void get().loadInitialKlines();
   },
 
   setKlines: (klines: Kline[]) => {
-    set({ klines });
+    const normalizedKlines = normalizeKlines(klines);
+    set({
+      klines: normalizedKlines,
+      klineSource: normalizedKlines.length > 0 ? get().klineSource : 'empty',
+    });
   },
 
   updateKline: (kline: Kline) => {
@@ -45,20 +136,19 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       return;
     }
 
-    const index = klines.findIndex((k) => k.open_time === kline.open_time);
+    const index = klines.findIndex((item) => item.open_time === kline.open_time);
 
     if (index >= 0) {
-      // 更新现有 K 线
-      const newKlines = [...klines];
-      newKlines[index] = kline;
-      newKlines.sort((a, b) => a.open_time - b.open_time);
-      set({ klines: newKlines });
-    } else {
-      // 添加新 K 线
-      set({
-        klines: [...klines, kline].sort((a, b) => a.open_time - b.open_time),
-      });
+      const nextKlines = [...klines];
+      nextKlines[index] = kline;
+      nextKlines.sort((a, b) => a.open_time - b.open_time);
+      set({ klines: nextKlines });
+      return;
     }
+
+    set({
+      klines: [...klines, kline].sort((a, b) => a.open_time - b.open_time),
+    });
   },
 
   setLatestPrice: (price: number) => {
@@ -69,17 +159,18 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     set({ isConnected });
   },
 
-  fetchKlines: async () => {
+  loadInitialKlines: async () => {
     const { exchange, symbol, interval } = get();
     const marketKey = getMarketKey(exchange, symbol, interval);
     const fetchToken = ++latestFetchToken;
-    console.log(`🔄 获取 K 线数据：${exchange} ${symbol} ${interval}`);
-    
+
+    set({ isLoadingKlines: true });
+
     try {
       const response = await fetch(
-        `/quant/api/klines?exchange=${exchange}&symbol=${symbol}&interval=${interval}&limit=1000`
+        `/quant/api/klines?exchange=${exchange}&symbol=${symbol}&interval=${interval}&limit=${INITIAL_KLINE_LIMIT}`,
       );
-      const data = await response.json();
+      const data = await readJsonResponse<BackendKlineResponse>(response);
 
       if (fetchToken !== latestFetchToken) {
         return;
@@ -95,20 +186,264 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       if (currentMarketKey !== marketKey) {
         return;
       }
-      
+
       if (data.success) {
-        console.log(`✅ 获取到 ${data.count} 根 K 线`);
-        set({ klines: data.klines });
-      } else {
-        console.error('获取 K 线失败:', data.error);
-        set({ klines: [] });
+        const nextKlines = normalizeKlines(data.klines ?? []);
+        set({
+          klines: nextKlines,
+          klineSource: resolveKlineSource(data.source, nextKlines),
+          isLoadingKlines: false,
+          isLoadingOlderKlines: false,
+          hasMoreHistoricalKlines: data.hasMore ?? false,
+        });
+        return;
       }
+
+      console.error('Failed to load klines:', data.error);
+      set({
+        klines: [],
+        klineSource: 'empty',
+        isLoadingKlines: false,
+        isLoadingOlderKlines: false,
+        hasMoreHistoricalKlines: false,
+      });
     } catch (error) {
       if (fetchToken !== latestFetchToken) {
         return;
       }
-      console.error('获取 K 线失败:', error);
-      set({ klines: [] });
+
+      console.error('Failed to load klines:', error);
+      set({
+        klines: [],
+        klineSource: 'empty',
+        isLoadingKlines: false,
+        isLoadingOlderKlines: false,
+        hasMoreHistoricalKlines: false,
+      });
+    }
+  },
+
+  loadOlderKlines: async () => {
+    const {
+      exchange,
+      symbol,
+      interval,
+      klines,
+      isLoadingKlines,
+      isLoadingOlderKlines,
+      hasMoreHistoricalKlines,
+    } = get();
+
+    if (isLoadingKlines || isLoadingOlderKlines || !hasMoreHistoricalKlines || klines.length === 0) {
+      return;
+    }
+
+    const marketKey = getMarketKey(exchange, symbol, interval);
+    const earliestOpenTime = klines[0]?.open_time;
+
+    if (typeof earliestOpenTime !== 'number') {
+      return;
+    }
+
+    set({ isLoadingOlderKlines: true });
+
+    try {
+      const response = await fetch(
+        `/quant/api/klines?exchange=${exchange}&symbol=${symbol}&interval=${interval}&limit=${OLDER_KLINE_PAGE_SIZE}&before=${earliestOpenTime}`,
+      );
+      const data = await readJsonResponse<BackendKlineResponse>(response);
+
+      if (getMarketKey(get().exchange, get().symbol, get().interval) !== marketKey) {
+        return;
+      }
+
+      if (!data.success) {
+        set({ isLoadingOlderKlines: false, hasMoreHistoricalKlines: false });
+        return;
+      }
+
+      const olderKlines = normalizeKlines(data.klines ?? []);
+      const nextKlines = normalizeKlines([...olderKlines, ...get().klines]);
+
+      set({
+        klines: nextKlines,
+        klineSource: resolveKlineSource(data.source, nextKlines),
+        isLoadingOlderKlines: false,
+        hasMoreHistoricalKlines: data.hasMore ?? false,
+      });
+    } catch (error) {
+      console.error('Failed to load older klines:', error);
+      set({ isLoadingOlderKlines: false, hasMoreHistoricalKlines: false });
+    }
+  },
+
+  fetchSymbols: async () => {
+    const { exchange, symbol, interval } = get();
+    set({ isLoadingSymbols: true });
+
+    try {
+      const response = await fetch(
+        `/quant/api/symbols?exchange=${exchange}&type=spot`,
+      );
+      const data = await readJsonResponse<BackendSymbolsResponse>(response);
+
+      const nextSymbols = data.success
+        ? normalizeSymbols(data.symbols, exchange)
+        : [];
+
+      const resolvedSymbol = applySymbolOptions(set, symbol, nextSymbols);
+      writePersistedMarketSelection({ exchange, symbol: resolvedSymbol, interval });
+    } catch (error) {
+      console.error('Failed to load symbols:', error);
+      const resolvedSymbol = applySymbolOptions(set, symbol, []);
+      writePersistedMarketSelection({ exchange, symbol: resolvedSymbol, interval });
     }
   },
 }));
+
+function readPersistedMarketSelection() {
+  if (typeof sessionStorage === 'undefined') {
+    return DEFAULT_MARKET_SELECTION;
+  }
+
+  try {
+    const raw = sessionStorage.getItem(MARKET_SELECTION_STORAGE_KEY);
+
+    if (!raw) {
+      return DEFAULT_MARKET_SELECTION;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<typeof DEFAULT_MARKET_SELECTION>;
+
+    if (
+      typeof parsed.exchange !== 'string' ||
+      typeof parsed.symbol !== 'string' ||
+      typeof parsed.interval !== 'string'
+    ) {
+      return DEFAULT_MARKET_SELECTION;
+    }
+
+    return {
+      exchange: parsed.exchange,
+      symbol: parsed.symbol,
+      interval: parsed.interval,
+    };
+  } catch (error) {
+    console.error('Failed to parse persisted market selection:', error);
+    return DEFAULT_MARKET_SELECTION;
+  }
+}
+
+function writePersistedMarketSelection(selection: {
+  exchange: string;
+  symbol: string;
+  interval: string;
+}) {
+  if (typeof sessionStorage === 'undefined') {
+    return;
+  }
+
+  sessionStorage.setItem(
+    MARKET_SELECTION_STORAGE_KEY,
+    JSON.stringify(selection),
+  );
+}
+
+function normalizeSymbols(
+  symbols: BackendSymbol[] | undefined,
+  exchange: string,
+): SymbolOption[] {
+  if (!Array.isArray(symbols)) {
+    return [];
+  }
+
+  return symbols
+    .filter((item) => !item.exchange || item.exchange === exchange)
+    .filter((item) => item.type === undefined || item.type === 'spot')
+    .filter((item) => ['BTC', 'ETH'].includes(item.base_asset ?? ''))
+    .map((item) => ({
+      value: item.symbol,
+      label: item.base_asset && item.quote_asset
+        ? `${item.base_asset}/${item.quote_asset}`
+        : formatMarketSymbol(item.symbol),
+    }));
+}
+
+function normalizeKlines(klines: Kline[]): Kline[] {
+  const deduped = new Map<number, Kline>();
+
+  [...klines]
+    .sort((left, right) => left.open_time - right.open_time)
+    .forEach((kline) => {
+      deduped.set(kline.open_time, kline);
+    });
+
+  return [...deduped.values()];
+}
+
+function applySymbolOptions(
+  set: (partial: Partial<MarketState>) => void,
+  currentSymbol: string,
+  nextSymbols: SymbolOption[],
+): string {
+  const resolvedSymbols = nextSymbols.length > 0 ? nextSymbols : DEFAULT_SYMBOLS;
+  const hasCurrentSymbol = resolvedSymbols.some((item) => item.value === currentSymbol);
+  const resolvedSymbol = hasCurrentSymbol ? currentSymbol : resolvedSymbols[0].value;
+
+  set({
+    symbols: resolvedSymbols,
+    symbol: resolvedSymbol,
+    isLoadingSymbols: false,
+    ...(resolvedSymbol !== currentSymbol
+      ? { latestPrice: null, isLoadingKlines: true }
+      : {}),
+  });
+
+  return resolvedSymbol;
+}
+
+function resolveKlineSource(
+  source: BackendKlineResponse['source'],
+  klines: Kline[],
+): KlineSource {
+  if (source) {
+    return source;
+  }
+
+  return klines.length > 0 ? 'remote' : 'empty';
+}
+
+async function readJsonResponse<T extends { success?: boolean; error?: string }>(
+  response: Response,
+): Promise<T> {
+  const payload = await parseResponseBody<T>(response);
+  const status = typeof response.status === 'number' ? response.status : 200;
+  const isOk = response.ok !== false && status < 400;
+
+  if (!isOk) {
+    return {
+      ...payload,
+      success: false,
+      error: payload.error ?? `HTTP ${status}`,
+    };
+  }
+
+  return payload;
+}
+
+async function parseResponseBody<T>(response: Response): Promise<T> {
+  const textFn = (response as Response & { text?: () => Promise<string> }).text;
+
+  if (typeof textFn === 'function') {
+    const raw = await textFn.call(response);
+    return raw ? JSON.parse(raw) as T : {} as T;
+  }
+
+  const jsonFn = (response as Response & { json?: () => Promise<T> }).json;
+
+  if (typeof jsonFn === 'function') {
+    return jsonFn.call(response);
+  }
+
+  return {} as T;
+}

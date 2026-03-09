@@ -1,14 +1,16 @@
 import axios from 'axios';
 import WebSocket from 'ws';
-import type { ExchangeAdapter, Kline, SymbolInfo } from '../types/index.js';
+import { createProxyAgent } from '../network/proxy.js';
+import type { ExchangeAdapter, Kline, SymbolInfo, TradeTick } from '../types/index.js';
 
 export class BinanceAdapter implements ExchangeAdapter {
-  private baseUrl = 'https://api.binance.com';
-  private wsUrl = 'wss://stream.binance.com:9443/ws';
-  private wsConnections: Map<string, WebSocket> = new Map();
+  private readonly baseUrl = 'https://api.binance.com';
+  private readonly wsUrl = 'wss://stream.binance.com:9443/ws';
+  private readonly requestTimeoutMs = Number(process.env.EXCHANGE_REQUEST_TIMEOUT_MS ?? 2500);
+  private readonly proxyAgent = createProxyAgent();
+  private readonly wsConnections: Map<string, WebSocket> = new Map();
 
-  // 时间周期映射
-  private intervalMap: Record<string, string> = {
+  private readonly intervalMap: Record<string, string> = {
     '1m': '1m',
     '5m': '5m',
     '15m': '15m',
@@ -17,30 +19,39 @@ export class BinanceAdapter implements ExchangeAdapter {
     '1d': '1d',
   };
 
-  // 获取 K 线数据
-  async getKlines(symbol: string, interval: string, limit: number = 1000): Promise<Kline[]> {
+  async getKlines(
+    symbol: string,
+    interval: string,
+    limit: number = 1000,
+    before?: number,
+  ): Promise<Kline[]> {
     try {
       const response = await axios.get(`${this.baseUrl}/api/v3/klines`, {
         params: {
           symbol: symbol.toUpperCase(),
           interval: this.intervalMap[interval] || '1h',
           limit: Math.min(limit, 1000),
+          ...(typeof before === 'number' ? { endTime: before - 1 } : {}),
         },
+        httpAgent: this.proxyAgent,
+        httpsAgent: this.proxyAgent,
+        proxy: false,
+        timeout: this.requestTimeoutMs,
       });
 
-      return response.data.map((k: any[]) => ({
+      return response.data.map((item: any[]) => ({
         exchange: 'binance',
         symbol: symbol.toUpperCase(),
         interval: this.intervalMap[interval] || '1h',
-        open_time: k[0],
-        close_time: k[6],
-        open: parseFloat(k[1]),
-        high: parseFloat(k[2]),
-        low: parseFloat(k[3]),
-        close: parseFloat(k[4]),
-        volume: parseFloat(k[5]),
-        quote_volume: parseFloat(k[7]),
-        trades_count: k[8],
+        open_time: item[0],
+        close_time: item[6],
+        open: parseFloat(item[1]),
+        high: parseFloat(item[2]),
+        low: parseFloat(item[3]),
+        close: parseFloat(item[4]),
+        volume: parseFloat(item[5]),
+        quote_volume: parseFloat(item[7]),
+        trades_count: item[8],
         is_closed: 1,
       }));
     } catch (error: any) {
@@ -49,81 +60,39 @@ export class BinanceAdapter implements ExchangeAdapter {
     }
   }
 
-  // 订阅实时 K 线（WebSocket）
-  subscribeKline(
+  subscribeTrades(
     symbol: string,
-    interval: string,
-    callback: (kline: Kline) => void
-  ): () => void {
-    const streamName = `${symbol.toLowerCase()}@kline_${this.intervalMap[interval] || '1h'}`;
-    const wsUrl = `${this.wsUrl}/${streamName}`;
-
-    const ws = new WebSocket(wsUrl);
-    const key = `kline:${symbol}:${interval}`;
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data.toString());
-        const k = data.k;
-
-        const kline: Kline = {
-          exchange: 'binance',
-          symbol: symbol.toUpperCase(),
-          interval: this.intervalMap[interval] || '1h',
-          open_time: k.t,
-          close_time: k.T,
-          open: parseFloat(k.o),
-          high: parseFloat(k.h),
-          low: parseFloat(k.l),
-          close: parseFloat(k.c),
-          volume: parseFloat(k.v),
-          quote_volume: parseFloat(k.q),
-          trades_count: k.n,
-          is_closed: k.x ? 1 : 0,
-        };
-
-        callback(kline);
-      } catch (error: any) {
-        console.error('Binance Kline parse error:', error.message);
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error('Binance WebSocket error:', error);
-    };
-
-    this.wsConnections.set(key, ws);
-
-    // 返回取消订阅函数
-    return () => {
-      ws.close();
-      this.wsConnections.delete(key);
-    };
-  }
-
-  // 订阅最新价格（WebSocket）
-  subscribePrice(
-    symbol: string,
-    callback: (price: number) => void
+    callback: (trade: TradeTick) => void,
   ): () => void {
     const streamName = `${symbol.toLowerCase()}@trade`;
     const wsUrl = `${this.wsUrl}/${streamName}`;
-
-    const ws = new WebSocket(wsUrl);
-    const key = `price:${symbol}`;
+    const ws = new WebSocket(wsUrl, {
+      agent: this.proxyAgent,
+      handshakeTimeout: this.requestTimeoutMs,
+    });
+    const key = `trades:${symbol}`;
 
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data.toString());
         const price = parseFloat(data.p);
-        callback(price);
+        const quantity = parseFloat(data.q);
+
+        callback({
+          exchange: 'binance',
+          symbol: symbol.toUpperCase(),
+          price,
+          quantity,
+          quote_volume: price * quantity,
+          timestamp: Number(data.T),
+        });
       } catch (error: any) {
-        console.error('Binance Price parse error:', error.message);
+        console.error('Binance trade parse error:', error.message);
       }
     };
 
     ws.onerror = (error) => {
-      console.error('Binance WebSocket error:', error);
+      console.error('Binance trade WebSocket error:', error);
     };
 
     this.wsConnections.set(key, ws);
@@ -134,19 +103,84 @@ export class BinanceAdapter implements ExchangeAdapter {
     };
   }
 
-  // 获取交易对列表
+  subscribeKline(
+    symbol: string,
+    interval: string,
+    callback: (kline: Kline) => void,
+  ): () => void {
+    const streamName = `${symbol.toLowerCase()}@kline_${this.intervalMap[interval] || '1h'}`;
+    const wsUrl = `${this.wsUrl}/${streamName}`;
+    const ws = new WebSocket(wsUrl, {
+      agent: this.proxyAgent,
+      handshakeTimeout: this.requestTimeoutMs,
+    });
+    const key = `kline:${symbol}:${interval}`;
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data.toString());
+        const kline = data.k;
+
+        callback({
+          exchange: 'binance',
+          symbol: symbol.toUpperCase(),
+          interval: this.intervalMap[interval] || '1h',
+          open_time: kline.t,
+          close_time: kline.T,
+          open: parseFloat(kline.o),
+          high: parseFloat(kline.h),
+          low: parseFloat(kline.l),
+          close: parseFloat(kline.c),
+          volume: parseFloat(kline.v),
+          quote_volume: parseFloat(kline.q),
+          trades_count: kline.n,
+          is_closed: kline.x ? 1 : 0,
+        });
+      } catch (error: any) {
+        console.error('Binance kline parse error:', error.message);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('Binance kline WebSocket error:', error);
+    };
+
+    this.wsConnections.set(key, ws);
+
+    return () => {
+      ws.close();
+      this.wsConnections.delete(key);
+    };
+  }
+
+  subscribePrice(
+    symbol: string,
+    callback: (price: number) => void,
+  ): () => void {
+    const unsubscribe = this.subscribeTrades(symbol, (trade) => {
+      callback(trade.price);
+    });
+
+    return unsubscribe;
+  }
+
   async getSymbols(): Promise<SymbolInfo[]> {
     try {
-      const response = await axios.get(`${this.baseUrl}/api/v3/exchangeInfo`);
-      
+      const response = await axios.get(`${this.baseUrl}/api/v3/exchangeInfo`, {
+        httpAgent: this.proxyAgent,
+        httpsAgent: this.proxyAgent,
+        proxy: false,
+        timeout: this.requestTimeoutMs,
+      });
+
       return response.data.symbols
-        .filter((s: any) => s.quoteAsset === 'USDT' && s.status === 'TRADING')
-        .filter((s: any) => ['BTC', 'ETH'].includes(s.baseAsset))
-        .map((s: any) => ({
+        .filter((item: any) => item.quoteAsset === 'USDT' && item.status === 'TRADING')
+        .filter((item: any) => ['BTC', 'ETH'].includes(item.baseAsset))
+        .map((item: any) => ({
           exchange: 'binance',
-          symbol: s.symbol,
-          base_asset: s.baseAsset,
-          quote_asset: s.quoteAsset,
+          symbol: item.symbol,
+          base_asset: item.baseAsset,
+          quote_asset: item.quoteAsset,
           type: 'spot',
           status: 'active',
         }));
@@ -156,7 +190,6 @@ export class BinanceAdapter implements ExchangeAdapter {
     }
   }
 
-  // 关闭所有 WebSocket 连接
   closeAll() {
     this.wsConnections.forEach((ws) => ws.close());
     this.wsConnections.clear();

@@ -1,8 +1,9 @@
 import { db } from '../database/sqlite.js';
 import { BinanceAdapter } from '../exchanges/binance.js';
 import { OKXAdapter } from '../exchanges/okx.js';
-import type { Kline } from '../types/index.js';
-import type { ExchangeAdapter } from '../types/index.js';
+import type { ExchangeAdapter, Kline, KlineQueryResult } from '../types/index.js';
+
+const DEFAULT_INITIAL_KLINE_LIMIT = 2000;
 
 export class KlineService {
   private adapters: Map<string, ExchangeAdapter>;
@@ -14,47 +15,63 @@ export class KlineService {
     ]);
   }
 
-  // 获取 K 线数据（数据库优先，不足则从交易所拉取）
   async getKlines(
     exchange: string,
     symbol: string,
     interval: string,
-    limit: number = 1000
-  ): Promise<Kline[]> {
-    // 1. 查询数据库
-    const cached = await db.getKlines(exchange, symbol, interval, limit);
-    
-    if (cached && cached.length >= limit) {
-      // 数据库数据足够，直接返回
-      return cached;
+    limit: number = DEFAULT_INITIAL_KLINE_LIMIT,
+    before?: number,
+  ): Promise<KlineQueryResult> {
+    const requestLimit = limit + 1;
+    const cached = normalizeKlines(
+      await db.getKlines(exchange, symbol, interval, requestLimit, before) as Kline[],
+    );
+
+    if (cached.length >= requestLimit) {
+      return {
+        klines: cached.slice(-limit),
+        source: 'cache',
+        hasMore: true,
+      };
     }
 
-    // 2. 数据库数据不足，从交易所拉取
-    console.log(`数据库数据不足 (${cached?.length || 0}/${limit})，从 ${exchange} 拉取...`);
-    
+    console.log(`Cache miss for ${exchange}:${symbol}:${interval} (${cached.length}/${limit})`);
+
     try {
       const adapter = this.adapters.get(exchange);
 
       if (!adapter) {
-        console.warn(`未找到交易所适配器：${exchange}`);
-        return cached || [];
+        console.warn(`Missing exchange adapter: ${exchange}`);
+        return this.buildFallbackResult(cached, limit);
       }
 
-      const remoteKlines = await adapter.getKlines(symbol, interval, limit);
+      const remoteKlines = await this.fetchPagedRemoteKlines(
+        adapter,
+        symbol,
+        interval,
+        requestLimit,
+        before,
+      );
+      const mergedKlines = normalizeKlines([...cached, ...remoteKlines]);
+      const hasMore = mergedKlines.length > limit;
+      const responseKlines = mergedKlines.slice(-limit);
 
       if (remoteKlines.length > 0) {
         await this.saveKlines(remoteKlines);
-        return remoteKlines;
+        return {
+          klines: responseKlines,
+          source: responseKlines.length === cached.length ? 'cache' : 'remote',
+          hasMore,
+        };
       }
 
-      return cached || [];
+      return this.buildFallbackResult(cached, limit);
     } catch (error: any) {
-      console.error('从交易所拉取 K 线失败:', error.message);
-      return cached || [];
+      console.error('Failed to load remote klines:', error.message);
+      return this.buildFallbackResult(cached, limit);
     }
   }
 
-  // 保存 K 线数据
   async saveKline(kline: Kline): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       db.saveKline(kline, (error) => {
@@ -68,7 +85,6 @@ export class KlineService {
     });
   }
 
-  // 批量保存 K 线数据
   async saveKlines(klines: Kline[]): Promise<void> {
     if (klines.length === 0) {
       return;
@@ -86,15 +102,95 @@ export class KlineService {
     });
   }
 
-  // 获取支持的交易所
+  async getLatestCachedKline(
+    exchange: string,
+    symbol: string,
+    interval: string,
+  ): Promise<Kline | null> {
+    const klines = await db.getKlines(exchange, symbol, interval, 1) as Kline[];
+    return klines[0] ?? null;
+  }
+
   getExchanges(): string[] {
     return ['binance', 'okx'];
   }
 
-  // 获取支持的交易对
   async getSymbols(exchange?: string, type?: string): Promise<any[]> {
     return db.getSymbols(exchange, type);
+  }
+
+  private buildFallbackResult(cached: Kline[], limit: number): KlineQueryResult {
+    const hasMore = cached.length > limit;
+    const klines = cached.slice(-limit);
+
+    if (cached.length > 0) {
+      return {
+        klines,
+        source: 'cache',
+        hasMore,
+      };
+    }
+
+    return {
+      klines: [],
+      source: 'cache',
+      hasMore: false,
+    };
+  }
+
+  private async fetchPagedRemoteKlines(
+    adapter: ExchangeAdapter,
+    symbol: string,
+    interval: string,
+    limit: number,
+    before?: number,
+  ): Promise<Kline[]> {
+    const collected = new Map<number, Kline>();
+    let cursor = before;
+    let remaining = limit;
+
+    while (remaining > 0) {
+      const page = normalizeKlines(
+        await adapter.getKlines(symbol, interval, remaining, cursor),
+      );
+
+      if (page.length === 0) {
+        break;
+      }
+
+      page.forEach((kline) => {
+        collected.set(kline.open_time, kline);
+      });
+
+      remaining = limit - collected.size;
+
+      const earliest = page[0];
+
+      if (!earliest || page.length === 1 && cursor === earliest.open_time) {
+        break;
+      }
+
+      cursor = earliest.open_time;
+
+      if (page.length === 1) {
+        break;
+      }
+    }
+
+    return normalizeKlines([...collected.values()]).slice(-limit);
   }
 }
 
 export const klineService = new KlineService();
+
+function normalizeKlines(klines: Kline[]): Kline[] {
+  const deduped = new Map<number, Kline>();
+
+  [...klines]
+    .sort((left, right) => left.open_time - right.open_time)
+    .forEach((kline) => {
+      deduped.set(kline.open_time, kline);
+    });
+
+  return [...deduped.values()];
+}

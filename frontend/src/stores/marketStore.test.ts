@@ -42,14 +42,17 @@ describe('marketStore', () => {
         interval: '1h',
         klines: [],
         latestPrice: null,
-        isConnected: false,
-      },
-      true,
-    );
+      isConnected: false,
+      isLoadingKlines: false,
+      isLoadingOlderKlines: false,
+      hasMoreHistoricalKlines: true,
+    },
+    true,
+  );
     vi.restoreAllMocks();
   });
 
-  it('clears stale chart data immediately when switching market selection', () => {
+  it('preserves the previous chart while the next market is loading', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(() => new Promise(() => undefined)) as typeof fetch,
@@ -62,8 +65,9 @@ describe('marketStore', () => {
 
     useMarketStore.getState().setExchange('okx');
 
-    expect(useMarketStore.getState().klines).toEqual([]);
+    expect(useMarketStore.getState().klines).toEqual([makeKline()]);
     expect(useMarketStore.getState().latestPrice).toBeNull();
+    expect(useMarketStore.getState().isLoadingKlines).toBe(true);
   });
 
   it('ignores stale fetch responses after the active market changes', async () => {
@@ -84,7 +88,7 @@ describe('marketStore', () => {
       interval: '1h',
     });
 
-    const firstFetch = useMarketStore.getState().fetchKlines();
+    const firstFetch = useMarketStore.getState().loadInitialKlines();
 
     useMarketStore.setState({
       exchange: 'okx',
@@ -92,7 +96,7 @@ describe('marketStore', () => {
       interval: '5m',
     });
 
-    const secondFetch = useMarketStore.getState().fetchKlines();
+    const secondFetch = useMarketStore.getState().loadInitialKlines();
 
     secondResponse.resolve({
       json: async () => ({
@@ -115,8 +119,197 @@ describe('marketStore', () => {
     expect(useMarketStore.getState().exchange).toBe('okx');
     expect(useMarketStore.getState().symbol).toBe('ETHUSDT');
     expect(useMarketStore.getState().interval).toBe('5m');
+    expect(useMarketStore.getState().klineSource).toBe('remote');
     expect(useMarketStore.getState().klines).toEqual([
       makeKline({ exchange: 'okx', symbol: 'ETHUSDT', interval: '5m', open_time: 10 }),
+    ]);
+  });
+
+  it('stores the backend-provided kline source when historical data loads', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          success: true,
+          source: 'cache',
+          klines: [makeKline()],
+          count: 1,
+        }),
+      }) as Response) as typeof fetch,
+    );
+
+    await useMarketStore.getState().loadInitialKlines();
+
+    expect(useMarketStore.getState().isLoadingKlines).toBe(false);
+    expect(useMarketStore.getState().klineSource).toBe('cache');
+    expect(useMarketStore.getState().klines).toEqual([makeKline()]);
+  });
+
+  it('requests 2000 bars for the initial market load', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string) => {
+        expect(input).toContain('limit=2000');
+
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            source: 'remote',
+            klines: [makeKline()],
+          }),
+        } as Response;
+      }) as typeof fetch,
+    );
+
+    await useMarketStore.getState().loadInitialKlines();
+  });
+
+  it('requests older bars before the current earliest open time', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string) => {
+        expect(input).toContain('limit=1000');
+        expect(input).toContain('before=100');
+
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            source: 'cache',
+            klines: [makeKline({ open_time: 10, close_time: 11 })],
+          }),
+        } as Response;
+      }) as typeof fetch,
+    );
+
+    useMarketStore.setState({
+      klines: [makeKline({ open_time: 100, close_time: 101 })],
+      hasMoreHistoricalKlines: true,
+    } as Partial<ReturnType<typeof useMarketStore.getState>>);
+
+    await useMarketStore.getState().loadOlderKlines();
+  });
+
+  it('uses backend hasMore instead of guessing from page size on initial load', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          success: true,
+          source: 'remote',
+          hasMore: false,
+          klines: [makeKline()],
+        }),
+      }) as Response) as typeof fetch,
+    );
+
+    await useMarketStore.getState().loadInitialKlines();
+
+    expect(useMarketStore.getState().hasMoreHistoricalKlines).toBe(false);
+  });
+
+  it('uses backend hasMore instead of guessing from page size on older history loads', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          success: true,
+          source: 'cache',
+          hasMore: false,
+          klines: [makeKline({ open_time: 10, close_time: 11 })],
+        }),
+      }) as Response) as typeof fetch,
+    );
+
+    useMarketStore.setState({
+      klines: [makeKline({ open_time: 100, close_time: 101 })],
+      hasMoreHistoricalKlines: true,
+    } as Partial<ReturnType<typeof useMarketStore.getState>>);
+
+    await useMarketStore.getState().loadOlderKlines();
+
+    expect(useMarketStore.getState().hasMoreHistoricalKlines).toBe(false);
+  });
+
+  it('normalizes fetched klines into ascending unique open times before storing them', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          success: true,
+          source: 'remote',
+          klines: [
+            makeKline({ exchange: 'okx', open_time: 20, close_time: 21, close: 220 }),
+            makeKline({ exchange: 'okx', open_time: 10, close_time: 11, close: 110 }),
+            makeKline({ exchange: 'okx', open_time: 20, close_time: 21, close: 225 }),
+          ],
+        }),
+      }) as Response) as typeof fetch,
+    );
+
+    useMarketStore.setState({
+      exchange: 'okx',
+      symbol: 'BTCUSDT',
+      interval: '1h',
+    });
+
+    await useMarketStore.getState().loadInitialKlines();
+
+    expect(useMarketStore.getState().klines).toEqual([
+      makeKline({ exchange: 'okx', open_time: 10, close_time: 11, close: 110 }),
+      makeKline({ exchange: 'okx', open_time: 20, close_time: 21, close: 225 }),
+    ]);
+  });
+
+  it('marks klines as loading until the historical request resolves', async () => {
+    const response = deferred<Response>();
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => response.promise) as typeof fetch,
+    );
+
+    const fetchPromise = useMarketStore.getState().loadInitialKlines();
+
+    expect(useMarketStore.getState().isLoadingKlines).toBe(true);
+
+    response.resolve({
+      ok: true,
+      json: async () => ({
+        success: true,
+        source: 'remote',
+        klines: [makeKline()],
+      }),
+    } as Response);
+
+    await fetchPromise;
+
+    expect(useMarketStore.getState().isLoadingKlines).toBe(false);
+  });
+
+  it('falls back cleanly when the backend returns a non-json error response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 500,
+        text: async () => '',
+      }) as Response) as typeof fetch,
+    );
+
+    await useMarketStore.getState().loadInitialKlines();
+    await useMarketStore.getState().fetchSymbols();
+
+    expect(useMarketStore.getState().klines).toEqual([]);
+    expect(useMarketStore.getState().klineSource).toBe('empty');
+    expect((useMarketStore.getState() as any).symbols).toEqual([
+      { value: 'BTCUSDT', label: 'BTC/USDT' },
+      { value: 'ETHUSDT', label: 'ETH/USDT' },
     ]);
   });
 
@@ -135,5 +328,83 @@ describe('marketStore', () => {
     expect(useMarketStore.getState().klines).toEqual([
       makeKline({ exchange: 'okx', symbol: 'ETHUSDT', interval: '5m', open_time: 5 }),
     ]);
+  });
+
+  it('loads backend symbols for the active exchange and keeps only BTC/ETH pairs', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string) => {
+        expect(input).toBe('/quant/api/symbols?exchange=okx&type=spot');
+
+        return {
+          json: async () => ({
+            success: true,
+            symbols: [
+              { exchange: 'okx', symbol: 'BTCUSDT', base_asset: 'BTC', quote_asset: 'USDT', type: 'spot' },
+              { exchange: 'okx', symbol: 'ETHUSDT', base_asset: 'ETH', quote_asset: 'USDT', type: 'spot' },
+              { exchange: 'okx', symbol: 'SOLUSDT', base_asset: 'SOL', quote_asset: 'USDT', type: 'spot' },
+            ],
+          }),
+        } as Response;
+      }) as typeof fetch,
+    );
+
+    useMarketStore.setState({
+      exchange: 'okx',
+      symbol: 'BTCUSDT',
+    });
+
+    await (useMarketStore.getState() as any).fetchSymbols();
+
+    expect((useMarketStore.getState() as any).symbols).toEqual([
+      { value: 'BTCUSDT', label: 'BTC/USDT' },
+      { value: 'ETHUSDT', label: 'ETH/USDT' },
+    ]);
+    expect((useMarketStore.getState() as any).isLoadingSymbols).toBe(false);
+  });
+
+  it('replaces the active symbol when the fetched list no longer contains it', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        json: async () => ({
+          success: true,
+          symbols: [
+            { exchange: 'okx', symbol: 'ETHUSDT', base_asset: 'ETH', quote_asset: 'USDT', type: 'spot' },
+          ],
+        }),
+      }) as Response) as typeof fetch,
+    );
+
+    useMarketStore.setState({
+      exchange: 'okx',
+      symbol: 'BTCUSDT',
+    });
+
+    await (useMarketStore.getState() as any).fetchSymbols();
+
+    expect(useMarketStore.getState().symbol).toBe('ETHUSDT');
+  });
+
+  it('falls back to default BTC/ETH symbols when symbol loading fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('network down');
+      }) as typeof fetch,
+    );
+
+    useMarketStore.setState({
+      exchange: 'okx',
+      symbol: 'BTCUSDT',
+    });
+
+    await (useMarketStore.getState() as any).fetchSymbols();
+
+    expect((useMarketStore.getState() as any).symbols).toEqual([
+      { value: 'BTCUSDT', label: 'BTC/USDT' },
+      { value: 'ETHUSDT', label: 'ETH/USDT' },
+    ]);
+    expect((useMarketStore.getState() as any).isLoadingSymbols).toBe(false);
   });
 });

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.join(__dirname, '../../sqlite.db');
+const DEFAULT_KLINE_QUERY_LIMIT = 2000;
 
 export class DatabaseService {
   private db: sqlite3.Database;
@@ -167,17 +168,26 @@ export class DatabaseService {
     exchange: string,
     symbol: string,
     interval: string,
-    limit: number = 1000
+    limit: number = DEFAULT_KLINE_QUERY_LIMIT,
+    before?: number,
   ): Promise<any[]> {
     return new Promise((resolve, reject) => {
+      const beforeCondition = typeof before === 'number'
+        ? ' AND open_time < ?'
+        : '';
+      const params = typeof before === 'number'
+        ? [exchange, symbol, interval, before, limit]
+        : [exchange, symbol, interval, limit];
+
       this.db.all(
         `
         SELECT * FROM klines
         WHERE exchange = ? AND symbol = ? AND interval = ?
+        ${beforeCondition}
         ORDER BY open_time DESC
         LIMIT ?
       `,
-        [exchange, symbol, interval, limit],
+        params,
         (err, rows) => {
           if (err) {
             reject(err);

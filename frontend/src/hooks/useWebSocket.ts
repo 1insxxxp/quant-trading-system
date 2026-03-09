@@ -1,9 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
+import { createMarketSocketClient, type MarketSocketMessage } from '../lib/marketSocket';
 import { getMarketKey, useMarketStore } from '../stores/marketStore';
 import type { Kline } from '../types/index';
 
 export const useWebSocket = () => {
-  const wsRef = useRef<WebSocket | null>(null);
   const {
     exchange,
     symbol,
@@ -11,42 +11,30 @@ export const useWebSocket = () => {
     updateKline,
     setLatestPrice,
     setIsConnected,
-    fetchKlines,
+    loadInitialKlines,
   } = useMarketStore();
 
   useEffect(() => {
-    const marketKey = getMarketKey(exchange, symbol, interval);
-    console.log(`🔄 WebSocket 重新连接：${exchange} ${symbol} ${interval}`);
-    
-    // 关闭旧连接
-    if (wsRef.current) {
-      wsRef.current.close();
-    }
+    void loadInitialKlines();
 
-    // 连接 WebSocket - 使用相对路径，适配部署环境
+    const marketKey = getMarketKey(exchange, symbol, interval);
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${wsProtocol}//${window.location.host}/quant/ws`;
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
 
-    ws.onopen = () => {
-      console.log('✅ WebSocket 已连接');
-      setIsConnected(true);
-
-      // 订阅 K 线
-      const subscribeMsg = {
-        type: 'subscribe' as const,
+    const client = createMarketSocketClient({
+      url: wsUrl,
+      subscription: {
         exchange,
         symbol,
         interval,
-      };
-      ws.send(JSON.stringify(subscribeMsg));
-      console.log(`📡 已发送订阅：${exchange} ${symbol} ${interval}`);
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data.toString());
+      },
+      onConnected: () => {
+        setIsConnected(true);
+      },
+      onDisconnected: () => {
+        setIsConnected(false);
+      },
+      onMessage: (message: MarketSocketMessage) => {
         const activeState = useMarketStore.getState();
         const activeMarketKey = getMarketKey(
           activeState.exchange,
@@ -59,8 +47,9 @@ export const useWebSocket = () => {
         }
 
         switch (message.type) {
-          case 'kline':
-            const kline: Kline = message.data;
+          case 'kline': {
+            const kline = message.data as Kline;
+
             if (
               message.exchange !== exchange ||
               message.symbol !== symbol ||
@@ -68,53 +57,29 @@ export const useWebSocket = () => {
             ) {
               return;
             }
-            console.log('📊 收到 K 线更新:', kline.close);
+
             updateKline(kline);
-            
-            // 更新最新价格
+
             if (kline.close) {
               setLatestPrice(kline.close);
             }
             break;
-
-          case 'subscribed':
-            console.log(`✅ 已订阅：${message.exchange} ${message.symbol} ${message.interval}`);
-            // 订阅成功后立即加载历史数据
-            console.log('📥 开始加载历史 K 线...');
-            fetchKlines();
-            break;
+          }
 
           case 'error':
-            console.error('❌ WebSocket 错误:', message.error);
+            console.error('WebSocket message error:', message.error);
             break;
         }
-      } catch (error) {
-        console.error('解析 WebSocket 消息失败:', error);
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error('❌ WebSocket 错误:', error);
-      setIsConnected(false);
-    };
-
-    ws.onclose = () => {
-      console.log('🔌 WebSocket 已断开');
-      setIsConnected(false);
-
-      // 3 秒后尝试重连
-      setTimeout(() => {
-        console.log('🔄 尝试重连...');
-      }, 3000);
-    };
+      },
+      onError: (error) => {
+        console.error('WebSocket transport error:', error);
+      },
+    });
 
     return () => {
-      if (wsRef.current) {
-        console.log('🔌 清理旧连接');
-        wsRef.current.close();
-      }
+      client.disconnect();
     };
-  }, [exchange, symbol, interval]); // 当切换交易所/交易对/周期时重新连接
+  }, [exchange, symbol, interval, loadInitialKlines, setIsConnected, setLatestPrice, updateKline]);
 
   return null;
 };
