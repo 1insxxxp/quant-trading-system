@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { mockDb, binanceAdapterMock, okxAdapterMock } = vi.hoisted(() => ({
   mockDb: {
     getKlines: vi.fn(),
-    hasOlderKlines: vi.fn(),
     saveKline: vi.fn(),
     saveKlines: vi.fn(),
     getSymbols: vi.fn(),
@@ -17,6 +16,10 @@ const { mockDb, binanceAdapterMock, okxAdapterMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('../database/sqlite.js', () => ({
+  db: mockDb,
+}));
+
+vi.mock('../database/postgres.js', () => ({
   db: mockDb,
 }));
 
@@ -50,13 +53,8 @@ function makeKline(openTime: number, exchange = 'binance') {
 describe('KlineService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockDb.hasOlderKlines.mockResolvedValue(false);
-    mockDb.saveKline.mockImplementation((_kline, callback) => {
-      callback?.(null);
-    });
-    mockDb.saveKlines.mockImplementation((_klines, callback) => {
-      callback?.(null);
-    });
+    mockDb.saveKline.mockResolvedValue(undefined);
+    mockDb.saveKlines.mockResolvedValue(undefined);
   });
 
   it('fetches and persists klines when the requested market is missing from cache', async () => {
@@ -85,7 +83,7 @@ describe('KlineService', () => {
     const result = await service.getKlines('okx', 'ETHUSDT', '5m', 100);
 
     expect(okxAdapterMock.getKlines).toHaveBeenCalledWith('ETHUSDT', '5m', 101, undefined);
-    expect(mockDb.saveKlines).toHaveBeenCalledWith(remoteKlines, expect.any(Function));
+    expect(mockDb.saveKlines).toHaveBeenCalledWith(remoteKlines);
     expect(result).toEqual({
       klines: remoteKlines,
       source: 'remote',

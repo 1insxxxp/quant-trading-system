@@ -98,18 +98,16 @@ async function initExchangeData() {
   console.log('Initializing exchange metadata and warm cache...');
 
   try {
+    await db.ready();
+
     const binanceAdapter = new BinanceAdapter();
     const binanceSymbols = await binanceAdapter.getSymbols();
-    binanceSymbols.forEach((symbol) => {
-      db.saveSymbol(symbol);
-    });
+    await Promise.all(binanceSymbols.map((symbol) => db.saveSymbol(symbol)));
     console.log(`Binance symbols loaded: ${binanceSymbols.length}`);
 
     const okxAdapter = new OKXAdapter();
     const okxSymbols = await okxAdapter.getSymbols();
-    okxSymbols.forEach((symbol) => {
-      db.saveSymbol(symbol);
-    });
+    await Promise.all(okxSymbols.map((symbol) => db.saveSymbol(symbol)));
     console.log(`OKX symbols loaded: ${okxSymbols.length}`);
 
     console.log('Preloading historical klines...');
@@ -124,7 +122,7 @@ async function initExchangeData() {
           const klines = await binanceAdapter.getKlines(symbol, interval, 1000);
 
           if (klines.length > 0) {
-            db.saveKlines(klines);
+            await db.saveKlines(klines);
             console.log(`    Saved ${klines.length} klines`);
           }
         } catch (error: any) {

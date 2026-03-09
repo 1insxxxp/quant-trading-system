@@ -73,16 +73,7 @@ export class KlineService {
   }
 
   async saveKline(kline: Kline): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      db.saveKline(kline, (error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-
-        resolve();
-      });
-    });
+    await db.saveKline(kline);
   }
 
   async saveKlines(klines: Kline[]): Promise<void> {
@@ -90,16 +81,7 @@ export class KlineService {
       return;
     }
 
-    await new Promise<void>((resolve, reject) => {
-      db.saveKlines(klines, (error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-
-        resolve();
-      });
-    });
+    await db.saveKlines(klines);
   }
 
   async getLatestCachedKline(
