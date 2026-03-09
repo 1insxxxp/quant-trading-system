@@ -1,6 +1,7 @@
 import axios from 'axios';
 import WebSocket from 'ws';
 import { createProxyAgent } from '../network/proxy.js';
+import { isBenignCloseBeforeConnectError, safeCloseWebSocket } from './websocket-close.js';
 import type { ExchangeAdapter, Kline, SymbolInfo, TradeTick } from '../types/index.js';
 
 export class BinanceAdapter implements ExchangeAdapter {
@@ -91,15 +92,22 @@ export class BinanceAdapter implements ExchangeAdapter {
       }
     };
 
+    ws.onclose = () => {
+      this.wsConnections.delete(key);
+    };
+
     ws.onerror = (error) => {
+      if (isBenignCloseBeforeConnectError(error, ws)) {
+        return;
+      }
+
       console.error('Binance trade WebSocket error:', error);
     };
 
     this.wsConnections.set(key, ws);
 
     return () => {
-      ws.close();
-      this.wsConnections.delete(key);
+      safeCloseWebSocket(ws);
     };
   }
 
@@ -141,15 +149,22 @@ export class BinanceAdapter implements ExchangeAdapter {
       }
     };
 
+    ws.onclose = () => {
+      this.wsConnections.delete(key);
+    };
+
     ws.onerror = (error) => {
+      if (isBenignCloseBeforeConnectError(error, ws)) {
+        return;
+      }
+
       console.error('Binance kline WebSocket error:', error);
     };
 
     this.wsConnections.set(key, ws);
 
     return () => {
-      ws.close();
-      this.wsConnections.delete(key);
+      safeCloseWebSocket(ws);
     };
   }
 
@@ -191,7 +206,7 @@ export class BinanceAdapter implements ExchangeAdapter {
   }
 
   closeAll() {
-    this.wsConnections.forEach((ws) => ws.close());
+    this.wsConnections.forEach((ws) => safeCloseWebSocket(ws));
     this.wsConnections.clear();
   }
 }

@@ -1,6 +1,7 @@
 import axios from 'axios';
 import WebSocket from 'ws';
 import { createProxyAgent } from '../network/proxy.js';
+import { isBenignCloseBeforeConnectError, safeCloseWebSocket } from './websocket-close.js';
 import type { ExchangeAdapter, Kline, SymbolInfo, TradeTick } from '../types/index.js';
 
 export class OKXAdapter implements ExchangeAdapter {
@@ -113,19 +114,23 @@ export class OKXAdapter implements ExchangeAdapter {
     };
 
     ws.onerror = (error) => {
+      if (isBenignCloseBeforeConnectError(error, ws)) {
+        return;
+      }
+
       console.error('OKX trade WebSocket error:', error);
     };
 
     ws.onclose = () => {
       clearInterval(pingInterval);
+      this.wsConnections.delete(key);
     };
 
     this.wsConnections.set(key, ws);
 
     return () => {
       clearInterval(pingInterval);
-      ws.close();
-      this.wsConnections.delete(key);
+      safeCloseWebSocket(ws);
     };
   }
 
@@ -185,19 +190,23 @@ export class OKXAdapter implements ExchangeAdapter {
     };
 
     ws.onerror = (error) => {
+      if (isBenignCloseBeforeConnectError(error, ws)) {
+        return;
+      }
+
       console.error('OKX kline WebSocket error:', error);
     };
 
     ws.onclose = () => {
       clearInterval(pingInterval);
+      this.wsConnections.delete(key);
     };
 
     this.wsConnections.set(key, ws);
 
     return () => {
       clearInterval(pingInterval);
-      ws.close();
-      this.wsConnections.delete(key);
+      safeCloseWebSocket(ws);
     };
   }
 
@@ -240,7 +249,7 @@ export class OKXAdapter implements ExchangeAdapter {
   }
 
   closeAll() {
-    this.wsConnections.forEach((ws) => ws.close());
+    this.wsConnections.forEach((ws) => safeCloseWebSocket(ws));
     this.wsConnections.clear();
   }
 
