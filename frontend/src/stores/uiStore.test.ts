@@ -31,6 +31,14 @@ describe('uiStore', () => {
     expect(useUiStore.getState().isSidebarCollapsed).toBe(false);
   });
 
+  it('falls back safely when localStorage exists without browser storage methods', async () => {
+    vi.stubGlobal('localStorage', {});
+
+    const { useUiStore } = await import('./uiStore');
+
+    expect(useUiStore.getState().isSidebarCollapsed).toBe(false);
+  });
+
   it('restores the collapsed sidebar preference from localStorage', async () => {
     vi.stubGlobal('localStorage', createStorage('true'));
 
