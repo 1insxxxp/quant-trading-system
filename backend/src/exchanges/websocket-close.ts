@@ -22,6 +22,26 @@ export function isBenignCloseBeforeConnectError(error: unknown, ws?: WebSocket |
     return false;
   }
 
-  const message = error instanceof Error ? error.message : String(error);
+  const message = getWebSocketErrorMessage(error);
   return message.includes(CLOSE_BEFORE_CONNECT_MESSAGE);
+}
+
+function getWebSocketErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (error && typeof error === 'object') {
+    const eventLikeError = (error as { error?: unknown }).error;
+    if (eventLikeError instanceof Error) {
+      return eventLikeError.message;
+    }
+
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string') {
+      return message;
+    }
+  }
+
+  return String(error);
 }

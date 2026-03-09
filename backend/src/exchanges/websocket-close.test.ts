@@ -51,4 +51,23 @@ describe('websocket-close', () => {
       ),
     ).toBe(false);
   });
+
+  it('recognizes benign close-before-connect errors wrapped in an event object', () => {
+    const ws = {
+      readyState: WebSocket.CONNECTING,
+      close: vi.fn(),
+      terminate: vi.fn(),
+    } as unknown as WebSocket;
+
+    safeCloseWebSocket(ws);
+
+    expect(
+      isBenignCloseBeforeConnectError(
+        {
+          error: new Error('WebSocket was closed before the connection was established'),
+        },
+        ws,
+      ),
+    ).toBe(true);
+  });
 });
