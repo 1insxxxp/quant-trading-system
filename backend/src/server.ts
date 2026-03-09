@@ -1,6 +1,6 @@
 import cors from 'cors';
 import express from 'express';
-import { db } from './database/sqlite.js';
+import { db } from './database/postgres.js';
 import { BinanceAdapter } from './exchanges/binance.js';
 import { OKXAdapter } from './exchanges/okx.js';
 import { klineService } from './services/kline.service.js';
