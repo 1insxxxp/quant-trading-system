@@ -1,5 +1,6 @@
 import { Pool, type QueryResult } from 'pg';
 import type {
+  ChartIndicatorSettings,
   KlineSyncState,
   KlineSyncStateUpdate,
   SymbolSyncState,
@@ -16,6 +17,15 @@ const DB_CONFIG = {
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
 };
+
+const DEFAULT_CHART_INDICATOR_SETTINGS: ChartIndicatorSettings = {
+  volume: false,
+  ma5: false,
+  ma10: false,
+  ma20: false,
+};
+
+const CHART_PREFERENCES_KEY = 'chart-indicators';
 
 type QueryParams = readonly unknown[] | unknown[];
 
@@ -106,6 +116,15 @@ export class DatabaseService {
           created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
           PRIMARY KEY(exchange, type)
+        )
+      `);
+
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS chart_preferences (
+          preference_key TEXT PRIMARY KEY,
+          settings JSONB NOT NULL,
+          created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         )
       `);
 
@@ -521,6 +540,37 @@ export class DatabaseService {
     return result.rows.length;
   }
 
+  async getChartIndicatorSettings(): Promise<ChartIndicatorSettings> {
+    const result = await this.query(
+      `
+        SELECT settings
+        FROM chart_preferences
+        WHERE preference_key = $1
+      `,
+      [CHART_PREFERENCES_KEY],
+    );
+
+    return normalizeChartIndicatorSettings(result.rows[0]?.settings);
+  }
+
+  async saveChartIndicatorSettings(settings: ChartIndicatorSettings): Promise<ChartIndicatorSettings> {
+    const normalizedSettings = normalizeChartIndicatorSettings(settings);
+
+    await this.query(
+      `
+        INSERT INTO chart_preferences (preference_key, settings)
+        VALUES ($1, $2::jsonb)
+        ON CONFLICT (preference_key)
+        DO UPDATE SET
+          settings = EXCLUDED.settings,
+          updated_at = CURRENT_TIMESTAMP
+      `,
+      [CHART_PREFERENCES_KEY, JSON.stringify(normalizedSettings)],
+    );
+
+    return normalizedSettings;
+  }
+
   async close(): Promise<void> {
     await this.pool.end();
   }
@@ -571,5 +621,22 @@ function mapSymbolSyncState(row: Record<string, unknown>): SymbolSyncState {
     last_error: (row.last_error as string | null) ?? null,
     created_at: row.created_at as string | Date,
     updated_at: row.updated_at as string | Date,
+  };
+}
+
+function normalizeChartIndicatorSettings(
+  raw: unknown,
+): ChartIndicatorSettings {
+  if (!raw || typeof raw !== 'object') {
+    return { ...DEFAULT_CHART_INDICATOR_SETTINGS };
+  }
+
+  const source = raw as Partial<Record<keyof ChartIndicatorSettings, unknown>>;
+
+  return {
+    volume: source.volume === true,
+    ma5: source.ma5 === true,
+    ma10: source.ma10 === true,
+    ma20: source.ma20 === true,
   };
 }

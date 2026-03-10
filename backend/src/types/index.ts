@@ -144,3 +144,7 @@ export interface SymbolResponse {
   symbols?: SymbolInfo[];
   error?: string;
 }
+
+export type ChartIndicatorId = 'volume' | 'ma5' | 'ma10' | 'ma20';
+
+export type ChartIndicatorSettings = Record<ChartIndicatorId, boolean>;

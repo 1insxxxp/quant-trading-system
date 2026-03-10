@@ -1,13 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { interpolateNumber } from './marketDisplay';
+import { formatDocumentTitle } from './marketDisplay';
 
-describe('interpolateNumber', () => {
-  it('returns the start value at progress zero and the target at progress one', () => {
-    expect(interpolateNumber(100, 250, 0)).toBe(100);
-    expect(interpolateNumber(100, 250, 1)).toBe(250);
+describe('marketDisplay', () => {
+  it('formats the browser title with live price and market', () => {
+    expect(formatDocumentTitle({
+      exchange: 'binance',
+      symbol: 'ETHUSDT',
+      latestPrice: 2022.71,
+    })).toBe('$2,022.71 ETH/USDT · BINANCE');
   });
 
-  it('returns an interpolated value for partial progress', () => {
-    expect(interpolateNumber(100, 250, 0.5)).toBe(175);
+  it('falls back to market-only title when no live price is available', () => {
+    expect(formatDocumentTitle({
+      exchange: 'okx',
+      symbol: 'BTC-USDT',
+      latestPrice: null,
+    })).toBe('BTC/USDT · OKX - 实时行情');
   });
 });

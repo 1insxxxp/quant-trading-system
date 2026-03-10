@@ -1,35 +1,48 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   createChart,
   type CandlestickData,
   type IChartApi,
+  type MouseEventParams,
   type ISeriesApi,
+  type Time,
 } from 'lightweight-charts';
 import { formatMarketSymbol } from '../lib/marketDisplay';
 import { useMarketStore } from '../stores/marketStore';
+import { type ThemeMode, useUiStore } from '../stores/uiStore';
+import { ChartInspector, type ChartInspectorSnapshot } from './ChartInspector';
+import { IndicatorSettingsButton } from './IndicatorSettingsButton';
 import { Toolbar } from './Toolbar';
 import {
   buildCandlestickData,
   resolveChartUpdateMode,
   shouldLoadOlderKlines,
 } from './klineChartData';
+import { buildIndicatorLegend, syncIndicatorSeries } from './klineChartIndicators';
+import type { Kline } from '../types';
 
 export const KlineChart: React.FC = () => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const ma5SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const ma10SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const ma20SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const previousDataRef = useRef<CandlestickData[]>([]);
   const previousMarketKeyRef = useRef<string | null>(null);
+  const [inspectorSnapshot, setInspectorSnapshot] = useState<ChartInspectorSnapshot | null>(null);
+  const theme = useUiStore((state) => state.theme);
 
   const {
     klines,
-    klineSource,
     exchange,
     symbol,
     interval,
-    isConnected,
     isLoadingKlines,
     isLoadingOlderKlines,
+    indicatorSettings,
+    updateIndicatorSetting,
   } = useMarketStore();
 
   useEffect(() => {
@@ -37,51 +50,93 @@ export const KlineChart: React.FC = () => {
       return;
     }
 
+    const initialTheme = getChartTheme(theme);
+    const initialHeight = Math.max(chartContainerRef.current.clientHeight, 520);
     const chart = createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth,
-      height: 620,
-      layout: {
-        background: { color: '#ffffff' },
-        textColor: '#425466',
-      },
-      grid: {
-        vertLines: { color: '#edf1f5' },
-        horzLines: { color: '#edf1f5' },
-      },
+      height: initialHeight,
+      layout: initialTheme.layout,
+      grid: initialTheme.grid,
       crosshair: {
         mode: 1,
+        vertLine: {
+          color: initialTheme.crosshairColor,
+        },
+        horzLine: {
+          color: initialTheme.crosshairColor,
+        },
       },
       timeScale: {
-        borderColor: '#dce3ea',
+        borderColor: initialTheme.scaleBorderColor,
         timeVisible: true,
         secondsVisible: false,
       },
       rightPriceScale: {
-        borderColor: '#dce3ea',
+        borderColor: initialTheme.scaleBorderColor,
       },
     });
 
     const candleSeries = chart.addCandlestickSeries({
-      upColor: '#0ea765',
-      downColor: '#e15656',
+      upColor: initialTheme.candleUpColor,
+      downColor: initialTheme.candleDownColor,
       borderVisible: false,
-      wickUpColor: '#0ea765',
-      wickDownColor: '#e15656',
+      wickUpColor: initialTheme.candleUpColor,
+      wickDownColor: initialTheme.candleDownColor,
+    });
+    const volumeSeries = chart.addHistogramSeries({
+      priceFormat: { type: 'volume' },
+      priceScaleId: '',
+    });
+    const ma5Series = chart.addLineSeries({
+      color: initialTheme.ma5Color,
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    const ma10Series = chart.addLineSeries({
+      color: initialTheme.ma10Color,
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    const ma20Series = chart.addLineSeries({
+      color: initialTheme.ma20Color,
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: {
+        top: 0.78,
+        bottom: 0,
+      },
     });
 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
+    volumeSeriesRef.current = volumeSeries;
+    ma5SeriesRef.current = ma5Series;
+    ma10SeriesRef.current = ma10Series;
+    ma20SeriesRef.current = ma20Series;
     previousDataRef.current = [];
 
-    const handleResize = () => {
+    const resizeChart = () => {
       if (chartContainerRef.current) {
         chart.applyOptions({
           width: chartContainerRef.current.clientWidth,
+          height: Math.max(chartContainerRef.current.clientHeight, 520),
         });
       }
     };
 
-    window.addEventListener('resize', handleResize);
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(() => {
+          resizeChart();
+        })
+      : null;
+
+    resizeObserver?.observe(chartContainerRef.current);
+    window.addEventListener('resize', resizeChart);
 
     const handleVisibleRangeChange = (range: { from: number; to: number } | null) => {
       if (
@@ -95,15 +150,61 @@ export const KlineChart: React.FC = () => {
       }
     };
 
+    const handleCrosshairMove = (param: MouseEventParams<Time>) => {
+      const activeKline = resolveKlineFromCrosshair({
+        param,
+        klines: useMarketStore.getState().klines,
+      });
+
+      setInspectorSnapshot(buildInspectorSnapshot(activeKline));
+    };
+
     chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange as never);
+    chart.subscribeCrosshairMove(handleCrosshairMove);
 
     return () => {
-      window.removeEventListener('resize', handleResize);
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', resizeChart);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange as never);
+      chart.unsubscribeCrosshairMove(handleCrosshairMove);
       previousDataRef.current = [];
       chart.remove();
     };
   }, []);
+
+  useEffect(() => {
+    const nextTheme = getChartTheme(theme);
+
+    chartRef.current?.applyOptions({
+      layout: nextTheme.layout,
+      grid: nextTheme.grid,
+      crosshair: {
+        mode: 1,
+        vertLine: {
+          color: nextTheme.crosshairColor,
+        },
+        horzLine: {
+          color: nextTheme.crosshairColor,
+        },
+      },
+      timeScale: {
+        borderColor: nextTheme.scaleBorderColor,
+      },
+      rightPriceScale: {
+        borderColor: nextTheme.scaleBorderColor,
+      },
+    });
+
+    candleSeriesRef.current?.applyOptions({
+      upColor: nextTheme.candleUpColor,
+      downColor: nextTheme.candleDownColor,
+      wickUpColor: nextTheme.candleUpColor,
+      wickDownColor: nextTheme.candleDownColor,
+    });
+    ma5SeriesRef.current?.applyOptions({ color: nextTheme.ma5Color });
+    ma10SeriesRef.current?.applyOptions({ color: nextTheme.ma10Color });
+    ma20SeriesRef.current?.applyOptions({ color: nextTheme.ma20Color });
+  }, [theme]);
 
   useEffect(() => {
     if (!candleSeriesRef.current) {
@@ -114,13 +215,22 @@ export const KlineChart: React.FC = () => {
 
     if (klines.length === 0) {
       candleSeriesRef.current.setData([]);
+      syncIndicatorSeries({
+        klines: [],
+        settings: indicatorSettings,
+        series: {
+          volume: volumeSeriesRef.current,
+          ma5: ma5SeriesRef.current,
+          ma10: ma10SeriesRef.current,
+          ma20: ma20SeriesRef.current,
+        },
+      });
       previousDataRef.current = [];
       previousMarketKeyRef.current = marketKey;
       return;
     }
 
     const data = buildCandlestickData(klines);
-
     const previousData = previousDataRef.current;
     const nextLast = data[data.length - 1];
     const updateMode = resolveChartUpdateMode({
@@ -153,37 +263,67 @@ export const KlineChart: React.FC = () => {
       }
     }
 
+    syncIndicatorSeries({
+      klines,
+      settings: indicatorSettings,
+      series: {
+        volume: volumeSeriesRef.current,
+        ma5: ma5SeriesRef.current,
+        ma10: ma10SeriesRef.current,
+        ma20: ma20SeriesRef.current,
+      },
+    });
+
     previousDataRef.current = data;
     previousMarketKeyRef.current = marketKey;
+  }, [klines, exchange, symbol, interval, indicatorSettings]);
+
+  useEffect(() => {
+    setInspectorSnapshot(buildInspectorSnapshot(klines[klines.length - 1] ?? null));
   }, [klines, exchange, symbol, interval]);
 
+  const legendItems = buildIndicatorLegend(klines, indicatorSettings);
+  const activeSnapshot = inspectorSnapshot ?? buildInspectorSnapshot(klines[klines.length - 1] ?? null);
+  const inspectorMarketLabel = `${formatMarketSymbol(symbol)} · ${interval} · ${exchange.toUpperCase()}`;
+
   return (
-    <section className="chart-panel">
-      <div className="chart-panel__terminal-bar">
-        <div className="chart-panel__market">
-          <span className="chart-panel__market-label">市场</span>
-          <strong className="chart-panel__market-title">
-            {exchange.toUpperCase()} / {formatMarketSymbol(symbol)}
-          </strong>
-        </div>
-
-        <div className="chart-panel__controls chart-panel__controls--terminal">
-          <Toolbar />
-        </div>
-
-        <div className="chart-badges chart-badges--terminal">
-          <span className="chart-badge">{interval}</span>
-          <span className="chart-badge">{klines.length} 根</span>
-          <span className={`chart-badge chart-badge--${klineSource}`}>
-            {klineSource === 'cache' ? '缓存' : '实时'}
-          </span>
-          <span className={`chart-badge chart-badge--${isConnected ? 'live' : 'waiting'}`}>
-            {isConnected ? '推送中' : '等待中'}
-          </span>
+    <section className="chart-panel chart-workspace">
+      <div className="chart-workspace__toolbar">
+        <div className="chart-workspace__toolbar-shell">
+          <div className="chart-workspace__toolbar-main">
+            <Toolbar />
+          </div>
+          <div className="chart-workspace__toolbar-side">
+            <IndicatorSettingsButton
+              settings={indicatorSettings}
+              onToggle={(indicatorId, enabled) => {
+                void updateIndicatorSetting(indicatorId, enabled);
+              }}
+            />
+          </div>
         </div>
       </div>
 
       <div className={`chart-panel__body ${isLoadingKlines ? 'chart-panel__body--loading' : ''}`}>
+        <div className="chart-panel__body-frame" />
+        <div className="chart-panel__hud">
+          <ChartInspector
+            marketLabel={inspectorMarketLabel}
+            snapshot={activeSnapshot}
+            showVolume={indicatorSettings.volume}
+          />
+          {legendItems.length > 0 ? (
+            <div className="chart-panel__hud-legend">
+              {legendItems.map((item) => (
+                <span key={item.label} className={`chart-indicator ${item.colorClass}`}>
+                  {item.label}
+                  {item.value !== null ? ` ${item.value.toFixed(2)}` : ''}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
         {isLoadingOlderKlines && !isLoadingKlines ? (
           <div className="chart-history-status" role="status" aria-live="polite">
             <span className="chart-history-status__dot" aria-hidden="true" />
@@ -215,3 +355,86 @@ export const KlineChart: React.FC = () => {
     </section>
   );
 };
+
+function buildInspectorSnapshot(kline: Kline | null): ChartInspectorSnapshot | null {
+  if (!kline) {
+    return null;
+  }
+
+  return {
+    timeLabel: formatKlineTimestamp(kline.open_time),
+    open: kline.open,
+    high: kline.high,
+    low: kline.low,
+    close: kline.close,
+    change: kline.close - kline.open,
+    percent: ((kline.close - kline.open) / kline.open) * 100,
+    volume: kline.volume,
+    quoteVolume: kline.quote_volume,
+  };
+}
+
+function formatKlineTimestamp(timestamp: number): string {
+  const normalized = timestamp >= 1_000_000_000_000 ? timestamp : timestamp * 1000;
+
+  return new Date(normalized).toLocaleString('sv-SE');
+}
+
+function getChartTheme(theme: ThemeMode) {
+  if (theme === 'light') {
+    return {
+      layout: {
+        background: { color: '#f5fbff' },
+        textColor: '#46617c',
+      },
+      grid: {
+        vertLines: { color: 'rgba(91, 134, 184, 0.12)' },
+        horzLines: { color: 'rgba(91, 134, 184, 0.12)' },
+      },
+      crosshairColor: 'rgba(67, 127, 194, 0.35)',
+      scaleBorderColor: 'rgba(99, 145, 198, 0.22)',
+      candleUpColor: '#12a875',
+      candleDownColor: '#da5672',
+      ma5Color: '#2586ff',
+      ma10Color: '#8f5dff',
+      ma20Color: '#ef9f1d',
+    };
+  }
+
+  return {
+    layout: {
+      background: { color: '#07101d' },
+      textColor: '#8eb1cf',
+    },
+    grid: {
+      vertLines: { color: 'rgba(65, 110, 158, 0.18)' },
+      horzLines: { color: 'rgba(65, 110, 158, 0.18)' },
+    },
+    crosshairColor: 'rgba(111, 181, 255, 0.3)',
+    scaleBorderColor: 'rgba(79, 126, 179, 0.28)',
+    candleUpColor: '#3ddc97',
+    candleDownColor: '#ff6b7c',
+    ma5Color: '#54a6ff',
+    ma10Color: '#a67dff',
+    ma20Color: '#ffbe55',
+  };
+}
+
+function resolveKlineFromCrosshair(params: {
+  param: MouseEventParams<Time>;
+  klines: ReturnType<typeof useMarketStore.getState>['klines'];
+}) {
+  const { param, klines } = params;
+
+  if (!param.point || param.time === undefined) {
+    return klines[klines.length - 1] ?? null;
+  }
+
+  const hoveredTimestamp = typeof param.time === 'number' ? Math.round(param.time * 1000) : null;
+
+  if (hoveredTimestamp === null) {
+    return klines[klines.length - 1] ?? null;
+  }
+
+  return klines.find((item) => item.open_time === hoveredTimestamp) ?? klines[klines.length - 1] ?? null;
+}

@@ -1,9 +1,22 @@
 import { create } from 'zustand';
 import { formatMarketSymbol } from '../lib/marketDisplay.js';
-import type { Kline, KlineSource, MarketState, SymbolOption } from '../types/index.js';
+import type {
+  IndicatorId,
+  IndicatorSettings,
+  Kline,
+  KlineSource,
+  MarketState,
+  SymbolOption,
+} from '../types/index.js';
 
 let latestFetchToken = 0;
 export const MARKET_SELECTION_STORAGE_KEY = 'quant-market-selection';
+export const DEFAULT_INDICATOR_SETTINGS: IndicatorSettings = {
+  volume: false,
+  ma5: false,
+  ma10: false,
+  ma20: false,
+};
 
 const DEFAULT_SYMBOLS: SymbolOption[] = [
   { value: 'BTCUSDT', label: 'BTC/USDT' },
@@ -40,6 +53,12 @@ interface BackendSymbolsResponse {
   error?: string;
 }
 
+interface BackendIndicatorSettingsResponse {
+  success: boolean;
+  settings?: Partial<Record<IndicatorId, boolean>>;
+  error?: string;
+}
+
 export function getMarketKey(exchange: string, symbol: string, interval: string): string {
   return `${exchange}:${symbol}:${interval}`;
 }
@@ -59,6 +78,8 @@ export const useMarketStore = create<MarketState>((set, get) => ({
   isLoadingKlines: false,
   isLoadingOlderKlines: false,
   hasMoreHistoricalKlines: true,
+  indicatorSettings: { ...DEFAULT_INDICATOR_SETTINGS },
+  isLoadingIndicatorSettings: false,
 
   setExchange: (exchange: string) => {
     set((state) => {
@@ -299,6 +320,54 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       writePersistedMarketSelection({ exchange, symbol: resolvedSymbol, interval });
     }
   },
+
+  fetchIndicatorSettings: async () => {
+    set({ isLoadingIndicatorSettings: true });
+
+    try {
+      const response = await fetch('/quant/api/preferences/chart-indicators');
+      const data = await readJsonResponse<BackendIndicatorSettingsResponse>(response);
+
+      set({
+        indicatorSettings: normalizeIndicatorSettings(data.settings),
+        isLoadingIndicatorSettings: false,
+      });
+    } catch (error) {
+      console.error('Failed to load chart indicator settings:', error);
+      set({
+        indicatorSettings: { ...DEFAULT_INDICATOR_SETTINGS },
+        isLoadingIndicatorSettings: false,
+      });
+    }
+  },
+
+  updateIndicatorSetting: async (indicatorId, enabled) => {
+    const previousSettings = get().indicatorSettings;
+    const nextSettings = {
+      ...previousSettings,
+      [indicatorId]: enabled,
+    };
+
+    set({ indicatorSettings: nextSettings });
+
+    try {
+      const response = await fetch('/quant/api/preferences/chart-indicators', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ settings: nextSettings }),
+      });
+      const data = await readJsonResponse<BackendIndicatorSettingsResponse>(response);
+
+      set({
+        indicatorSettings: normalizeIndicatorSettings(data.settings ?? nextSettings),
+      });
+    } catch (error) {
+      console.error('Failed to save chart indicator settings:', error);
+      set({ indicatorSettings: previousSettings });
+    }
+  },
 }));
 
 function readPersistedMarketSelection() {
@@ -411,6 +480,17 @@ function resolveKlineSource(
   }
 
   return klines.length > 0 ? 'remote' : 'empty';
+}
+
+function normalizeIndicatorSettings(
+  settings: Partial<Record<IndicatorId, boolean>> | undefined,
+): IndicatorSettings {
+  return {
+    volume: settings?.volume === true,
+    ma5: settings?.ma5 === true,
+    ma10: settings?.ma10 === true,
+    ma20: settings?.ma20 === true,
+  };
 }
 
 async function readJsonResponse<T extends { success?: boolean; error?: string }>(

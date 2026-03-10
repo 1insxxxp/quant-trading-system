@@ -96,6 +96,40 @@ app.get('/api/symbols', async (req, res) => {
   }
 });
 
+app.get('/api/preferences/chart-indicators', async (_req, res) => {
+  try {
+    const settings = await db.getChartIndicatorSettings();
+
+    res.json({
+      success: true,
+      settings,
+    });
+  } catch (error: any) {
+    console.error('Failed to load chart indicator settings:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+app.put('/api/preferences/chart-indicators', async (req, res) => {
+  try {
+    const settings = await db.saveChartIndicatorSettings(req.body?.settings ?? {});
+
+    res.json({
+      success: true,
+      settings,
+    });
+  } catch (error: any) {
+    console.error('Failed to save chart indicator settings:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 async function initExchangeData() {
   console.log('Initializing exchange metadata and warm cache...');
 

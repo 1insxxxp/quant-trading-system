@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useMarketStore } from './marketStore';
-import type { Kline } from '../types';
+import type { IndicatorSettings, Kline } from '../types';
 
 const initialState = useMarketStore.getState();
 
@@ -46,6 +46,13 @@ describe('marketStore', () => {
       isLoadingKlines: false,
       isLoadingOlderKlines: false,
       hasMoreHistoricalKlines: true,
+      indicatorSettings: {
+        volume: false,
+        ma5: false,
+        ma10: false,
+        ma20: false,
+      } satisfies IndicatorSettings,
+      isLoadingIndicatorSettings: false,
     },
     true,
   );
@@ -406,5 +413,55 @@ describe('marketStore', () => {
       { value: 'ETHUSDT', label: 'ETH/USDT' },
     ]);
     expect((useMarketStore.getState() as any).isLoadingSymbols).toBe(false);
+  });
+
+  it('loads backend indicator settings and keeps unknown keys ignored', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          success: true,
+          settings: {
+            volume: true,
+            ma5: true,
+            ma10: false,
+            ma20: true,
+            ema: true,
+          },
+        }),
+      }) as Response) as typeof fetch,
+    );
+
+    await useMarketStore.getState().fetchIndicatorSettings();
+
+    expect(useMarketStore.getState().indicatorSettings).toEqual({
+      volume: true,
+      ma5: true,
+      ma10: false,
+      ma20: true,
+    });
+    expect(useMarketStore.getState().isLoadingIndicatorSettings).toBe(false);
+  });
+
+  it('updates indicator settings optimistically and persists to backend', async () => {
+    const fetchSpy = vi.fn(async (_input: string, init?: RequestInit) => ({
+      ok: true,
+      json: async () => ({
+        success: true,
+        settings: JSON.parse(String(init?.body ?? '{}')).settings,
+      }),
+    }) as Response);
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await useMarketStore.getState().updateIndicatorSetting('ma10', true);
+
+    expect(useMarketStore.getState().indicatorSettings.ma10).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      '/quant/api/preferences/chart-indicators',
+      expect.objectContaining({
+        method: 'PUT',
+      }),
+    );
   });
 });

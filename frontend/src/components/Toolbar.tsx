@@ -34,7 +34,7 @@ export const Toolbar: React.FC = () => {
 
   const symbolOptions = symbols.length > 0
     ? symbols
-    : [{ value: '', label: isLoadingSymbols ? '加载中...' : '暂无交易对' }];
+    : [{ value: '', label: isLoadingSymbols ? '加载中…' : '暂无交易对' }];
 
   return (
     <div className="toolbar-inline toolbar-inline--terminal">

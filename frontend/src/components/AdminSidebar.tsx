@@ -1,4 +1,5 @@
 import React from 'react';
+import { BrandLogo } from './BrandLogo';
 
 type NavItem = {
   label: string;
@@ -17,9 +18,14 @@ const NAV_ITEMS: NavItem[] = [
 export const AdminSidebar: React.FC = () => (
   <aside className="admin-sidebar">
     <div className="admin-sidebar__brand">
+      <BrandLogo variant="full" className="admin-sidebar__brand-mark" />
       <p className="admin-sidebar__eyebrow">量化平台</p>
       <strong className="admin-sidebar__title">交易后台</strong>
       <span className="admin-sidebar__subtitle">Market Workspace</span>
+      <div className="admin-sidebar__brand-tags" aria-hidden="true">
+        <span className="admin-sidebar__brand-tag">Realtime</span>
+        <span className="admin-sidebar__brand-tag">Dual Theme</span>
+      </div>
     </div>
 
     <div className="admin-sidebar__section">

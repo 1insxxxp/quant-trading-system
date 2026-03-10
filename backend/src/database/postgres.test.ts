@@ -162,6 +162,44 @@ describe('DatabaseService', () => {
     expect(symbolSyncState).toEqual(makeSymbolSyncStateRow());
   });
 
+  it('creates chart preferences table and can persist indicator settings', async () => {
+    const pool = createMockPool();
+    pool.query.mockResolvedValue({ rows: [] });
+
+    const service = new DatabaseService(pool as never);
+    await service.ready();
+
+    const queries = pool.query.mock.calls.map((call) => String(call[0]));
+    expect(queries.some((query) => query.includes('CREATE TABLE IF NOT EXISTS chart_preferences'))).toBe(true);
+
+    await service.saveChartIndicatorSettings({
+      volume: true,
+      ma5: false,
+      ma10: true,
+      ma20: false,
+    });
+
+    expect(String(pool.query.mock.calls.at(-1)?.[0])).toContain('INSERT INTO chart_preferences');
+
+    pool.query.mockResolvedValueOnce({
+      rows: [{
+        settings: {
+          volume: true,
+          ma5: false,
+          ma10: true,
+          ma20: false,
+        },
+      }],
+    });
+
+    await expect(service.getChartIndicatorSettings()).resolves.toEqual({
+      volume: true,
+      ma5: false,
+      ma10: true,
+      ma20: false,
+    });
+  });
+
   it('backfills kline and symbol sync-state rows from existing data', async () => {
     const pool = createMockPool();
     pool.query.mockResolvedValue({ rows: [] });

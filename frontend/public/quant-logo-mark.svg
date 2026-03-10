@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
+  <defs>
+    <linearGradient id="shell" x1="26" y1="24" x2="136" y2="134" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22c7ff" />
+      <stop offset="0.52" stop-color="#2377ff" />
+      <stop offset="1" stop-color="#45d06f" />
+    </linearGradient>
+    <linearGradient id="accent" x1="58" y1="46" x2="106" y2="114" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#dff5ff" />
+      <stop offset="1" stop-color="#dce7f8" />
+    </linearGradient>
+    <linearGradient id="bars" x1="56" y1="54" x2="104" y2="108" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7de4ff" />
+      <stop offset="0.52" stop-color="#4ea0ff" />
+      <stop offset="1" stop-color="#7bf17f" />
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#081121" flood-opacity="0.24" />
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <path d="M80 26L118 48V92L80 118L42 92V48L80 26Z" fill="none" stroke="url(#shell)" stroke-width="10" stroke-linejoin="round" />
+    <path d="M80 42L103 55V86L80 100L57 86V55L80 42Z" fill="none" stroke="url(#accent)" stroke-width="8" stroke-linejoin="round" />
+    <path d="M36 105L72 69L89 86L126 49" fill="none" stroke="url(#shell)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M117 48L126 49L125 58" fill="none" stroke="url(#shell)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M39 103L55 87L67 95L82 79L96 90L111 75" fill="none" stroke="#5be179" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="34" cy="106" r="5" fill="#2377ff" stroke="#07111f" stroke-width="2.5" />
+    <circle cx="126" cy="49" r="5" fill="#7bf17f" stroke="#07111f" stroke-width="2.5" />
+    <circle cx="111" cy="75" r="4.5" fill="#7bf17f" stroke="#07111f" stroke-width="2.5" />
+    <path d="M60 90H68V71H60Z" fill="url(#bars)" />
+    <path d="M74 96H82V58H74Z" fill="url(#bars)" />
+    <path d="M88 86H96V66H88Z" fill="url(#bars)" />
+    <path d="M64 63V96M78 50V104M92 58V92" fill="none" stroke="#d9eefb" stroke-width="2.5" stroke-linecap="round" />
+  </g>
+</svg>

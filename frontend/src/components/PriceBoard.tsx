@@ -1,20 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  formatMarketSymbol,
+  formatLivePrice,
+  get24HourChangeSnapshot,
   getPriceSnapshot,
   interpolateNumber,
 } from '../lib/marketDisplay';
+import { getMarketSummary24h } from '../lib/marketSnapshot';
 import { useMarketStore } from '../stores/marketStore';
 import { InfoTip } from './InfoTip';
-
-const INTERVAL_LABELS: Record<string, string> = {
-  '1m': '1 分钟',
-  '5m': '5 分钟',
-  '15m': '15 分钟',
-  '1h': '1 小时',
-  '4h': '4 小时',
-  '1d': '1 天',
-};
 
 const ANIMATION_DURATION_MS = 420;
 
@@ -81,13 +74,6 @@ function useAnimatedNumber(value: number | null, shouldAnimate: boolean): number
   return displayValue;
 }
 
-function formatCurrency(value: number): string {
-  return `$${value.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
 function formatSignedNumber(value: number): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}`;
 }
@@ -99,33 +85,30 @@ function formatSignedPercent(value: number): string {
 export const PriceBoard: React.FC = () => {
   const {
     latestPrice,
-    exchange,
-    symbol,
-    interval,
-    isConnected,
     klines,
     isLoadingKlines,
   } = useMarketStore();
 
   const snapshot = getPriceSnapshot(latestPrice, klines);
-  const isUp = (snapshot.change ?? 0) >= 0;
-  const formattedSymbol = formatMarketSymbol(symbol);
-  const intervalLabel = INTERVAL_LABELS[interval] ?? interval;
+  const daySnapshot = get24HourChangeSnapshot(latestPrice, klines);
+  const summary = getMarketSummary24h({ latestPrice, klines });
+  const isPriceUp = (snapshot.change ?? 0) >= 0;
+  const isDayUp = (daySnapshot.change ?? 0) >= 0;
   const animatedPrice = useAnimatedNumber(snapshot.price, !isLoadingKlines);
-  const animatedChange = useAnimatedNumber(snapshot.change, !isLoadingKlines);
-  const animatedPercent = useAnimatedNumber(snapshot.percent, !isLoadingKlines);
+  const animatedDayChange = useAnimatedNumber(daySnapshot.change, !isLoadingKlines);
+  const animatedDayPercent = useAnimatedNumber(daySnapshot.percent, !isLoadingKlines);
 
   const priceText = isLoadingKlines
-    ? '加载中...'
+    ? '加载中…'
     : animatedPrice !== null
-      ? formatCurrency(animatedPrice)
+      ? formatLivePrice(animatedPrice)
       : '等待价格';
 
-  const changeText = !isLoadingKlines && snapshot.hasChange && animatedChange !== null && animatedPercent !== null
-    ? `${formatSignedNumber(animatedChange)} (${formatSignedPercent(animatedPercent)})`
+  const dayChangeText = !isLoadingKlines && daySnapshot.hasChange && animatedDayChange !== null && animatedDayPercent !== null
+      ? `${formatSignedNumber(animatedDayChange)} (${formatSignedPercent(animatedDayPercent)})`
     : isLoadingKlines
-      ? '切换中...'
-      : '等待历史 K 线';
+      ? '切换中…'
+      : '等待 24 小时数据';
 
   return (
     <section className="stats-grid">
@@ -135,10 +118,11 @@ export const PriceBoard: React.FC = () => {
           <InfoTip
             content="优先显示实时推送价格。切换市场时，会在新的历史 K 线接管后更新。"
             label="最新价格说明"
+            bubblePosition="below"
           />
         </div>
         <strong
-          className={`stat-value ${isLoadingKlines ? 'stat-value--muted' : snapshot.price !== null ? (isUp ? 'stat-value--up' : 'stat-value--down') : 'stat-value--muted'}`}
+          className={`stat-value ${isLoadingKlines ? 'stat-value--muted' : snapshot.price !== null ? (isPriceUp ? 'stat-value--up' : 'stat-value--down') : 'stat-value--muted'}`}
           data-testid="latest-price"
         >
           {priceText}
@@ -150,50 +134,25 @@ export const PriceBoard: React.FC = () => {
 
       <article className="stat-card">
         <div className="stat-heading">
-          <span className="stat-label">区间涨跌</span>
+          <span className="stat-label">24 小时涨跌</span>
           <InfoTip
-            content="基于当前已加载的 K 线区间计算，不代表完整 24 小时涨跌。"
-            label="区间涨跌说明"
+            content="基于当前市场最近 24 小时窗口计算涨跌额和涨跌幅，优先使用最新实时价格。"
+            label="24 小时涨跌说明"
+            bubblePosition="below"
           />
         </div>
-        <strong className={`stat-value ${!isLoadingKlines && snapshot.hasChange ? (isUp ? 'stat-value--up' : 'stat-value--down') : 'stat-value--muted'}`}>
-          {changeText}
+        <strong className={`stat-value ${!isLoadingKlines && daySnapshot.hasChange ? (isDayUp ? 'stat-value--up' : 'stat-value--down') : 'stat-value--muted'}`}>
+          {dayChangeText}
         </strong>
         <div className="stat-meta">
-          <span>{isLoadingKlines ? '等待新数据' : '基于已加载区间'}</span>
+          <span>{isLoadingKlines ? '等待新数据' : '过去 24 小时'}</span>
+          <span>{`24h 最高 ${summary.high !== null ? summary.high.toFixed(2) : '--'}`}</span>
+          <span>{`24h 最低 ${summary.low !== null ? summary.low.toFixed(2) : '--'}`}</span>
+          <span>{`24h 量 ${summary.volume !== null ? summary.volume.toFixed(2) : '--'}`}</span>
+          <span>{`24h 额 ${summary.quoteVolume !== null ? summary.quoteVolume.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '--'}`}</span>
         </div>
       </article>
 
-      <article className="stat-card">
-        <div className="stat-heading">
-          <span className="stat-label">连接状态</span>
-          <InfoTip
-            content="连接在线时，当前未收盘 K 线会持续接收最新更新。"
-            label="连接状态说明"
-          />
-        </div>
-        <span className={`status-pill ${isConnected ? 'status-pill--live' : 'status-pill--waiting'}`}>
-          {isConnected ? '链路在线' : '重连中'}
-        </span>
-        <div className="stat-meta">
-          <span>{isLoadingKlines ? '正在同步图表数据' : isConnected ? '实时更新中' : '等待重连'}</span>
-        </div>
-      </article>
-
-      <article className="stat-card">
-        <div className="stat-heading">
-          <span className="stat-label">当前市场</span>
-          <InfoTip
-            content="显示当前交易所、交易对、周期和已加载的 K 线数量。"
-            label="当前市场说明"
-          />
-        </div>
-        <strong className="stat-market">{exchange.toUpperCase()} / {formattedSymbol}</strong>
-        <div className="stat-meta">
-          <span>{intervalLabel}</span>
-          <span>{isLoadingKlines ? 'K 线加载中' : `${klines.length} 根`}</span>
-        </div>
-      </article>
     </section>
   );
 };

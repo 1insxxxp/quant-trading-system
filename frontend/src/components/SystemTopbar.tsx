@@ -1,9 +1,44 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { formatLivePrice, formatMarketSymbol } from '../lib/marketDisplay';
+import { useMarketStore } from '../stores/marketStore';
 import { useUiStore } from '../stores/uiStore';
+import { BrandLogo } from './BrandLogo';
+
+function formatSystemTime(value: Date): string {
+  return new Intl.DateTimeFormat('sv-SE', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(value);
+}
 
 export const SystemTopbar: React.FC = () => {
   const isSidebarCollapsed = useUiStore((state) => state.isSidebarCollapsed);
+  const theme = useUiStore((state) => state.theme);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
+  const toggleTheme = useUiStore((state) => state.toggleTheme);
+  const isConnected = useMarketStore((state) => state.isConnected);
+  const exchange = useMarketStore((state) => state.exchange);
+  const symbol = useMarketStore((state) => state.symbol);
+  const latestPrice = useMarketStore((state) => state.latestPrice);
+  const [systemTime, setSystemTime] = useState(() => formatSystemTime(new Date()));
+  const statusLabel = isConnected ? '链路在线' : '重连中';
+  const marketLabel = `${formatMarketSymbol(symbol)} · ${exchange.toUpperCase()}`;
+  const latestPriceLabel = latestPrice !== null ? formatLivePrice(latestPrice) : '等待价格';
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setSystemTime(formatSystemTime(new Date()));
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
 
   return (
     <header className="system-topbar">
@@ -28,7 +63,44 @@ export const SystemTopbar: React.FC = () => {
             )}
           </span>
         </button>
-        <strong className="system-topbar__title">后台工作台</strong>
+        <BrandLogo variant="mark" className="system-topbar__brand-mark" />
+        <div className="system-topbar__ticker">
+          <span className="system-topbar__ticker-label">实时行情</span>
+          <div className="system-topbar__ticker-main">
+            <strong className="system-topbar__price">{latestPriceLabel}</strong>
+            <span className="system-topbar__market">{marketLabel}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="system-topbar__meta">
+        <button
+          type="button"
+          className={`theme-toggle theme-toggle--${theme}`}
+          onClick={toggleTheme}
+          aria-label={theme === 'dark' ? '切换到亮色主题' : '切换到暗色主题'}
+          aria-pressed={theme === 'light'}
+        >
+          <span className="theme-toggle__track" aria-hidden="true">
+            <span className="theme-toggle__thumb" />
+          </span>
+          <span className="theme-toggle__icon" aria-hidden="true">
+            {theme === 'dark' ? '☼' : '☾'}
+          </span>
+          <span className="theme-toggle__label">{theme === 'dark' ? '亮系' : '暗系'}</span>
+        </button>
+
+        <div className="system-topbar__clock" role="timer" aria-live="polite">
+          <span className="system-topbar__clock-label">系统时间</span>
+          <strong className="system-topbar__clock-value">{systemTime}</strong>
+        </div>
+
+        <div className="system-topbar__status" role="status" aria-live="polite" aria-label={statusLabel}>
+          <span
+            className={`signal-light signal-light--${isConnected ? 'live' : 'waiting'}`}
+            aria-hidden="true"
+          />
+        </div>
       </div>
     </header>
   );

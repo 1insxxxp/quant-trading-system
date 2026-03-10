@@ -21,6 +21,10 @@ export interface SymbolOption {
   label: string;
 }
 
+export type IndicatorId = 'volume' | 'ma5' | 'ma10' | 'ma20';
+
+export type IndicatorSettings = Record<IndicatorId, boolean>;
+
 export interface MarketState {
   exchange: string;
   symbol: string;
@@ -34,6 +38,8 @@ export interface MarketState {
   isLoadingKlines: boolean;
   isLoadingOlderKlines: boolean;
   hasMoreHistoricalKlines: boolean;
+  indicatorSettings: IndicatorSettings;
+  isLoadingIndicatorSettings: boolean;
 
   setExchange: (exchange: string) => void;
   setSymbol: (symbol: string) => void;
@@ -45,4 +51,6 @@ export interface MarketState {
   loadInitialKlines: () => Promise<void>;
   loadOlderKlines: () => Promise<void>;
   fetchSymbols: () => Promise<void>;
+  fetchIndicatorSettings: () => Promise<void>;
+  updateIndicatorSetting: (indicatorId: IndicatorId, enabled: boolean) => Promise<void>;
 }
