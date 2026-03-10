@@ -84,14 +84,16 @@ export function shouldLoadOlderKlines(params: {
   visibleFrom: number | null | undefined;
   isLoadingOlderKlines: boolean;
   hasMoreHistoricalKlines: boolean;
+  isHistoryPagingReady: boolean;
 }): boolean {
   const {
     visibleFrom,
     isLoadingOlderKlines,
     hasMoreHistoricalKlines,
+    isHistoryPagingReady,
   } = params;
 
-  if (isLoadingOlderKlines || !hasMoreHistoricalKlines) {
+  if (isLoadingOlderKlines || !hasMoreHistoricalKlines || !isHistoryPagingReady) {
     return false;
   }
 

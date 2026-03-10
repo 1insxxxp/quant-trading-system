@@ -31,6 +31,8 @@ export const KlineChart: React.FC = () => {
   const ma20SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const previousDataRef = useRef<CandlestickData[]>([]);
   const previousMarketKeyRef = useRef<string | null>(null);
+  const isHistoryPagingReadyRef = useRef(false);
+  const historyPagingArmFrameRef = useRef<number | null>(null);
   const [inspectorSnapshot, setInspectorSnapshot] = useState<ChartInspectorSnapshot | null>(null);
   const theme = useUiStore((state) => state.theme);
 
@@ -144,6 +146,7 @@ export const KlineChart: React.FC = () => {
           visibleFrom: range?.from,
           isLoadingOlderKlines: useMarketStore.getState().isLoadingOlderKlines,
           hasMoreHistoricalKlines: useMarketStore.getState().hasMoreHistoricalKlines,
+          isHistoryPagingReady: isHistoryPagingReadyRef.current,
         })
       ) {
         void useMarketStore.getState().loadOlderKlines();
@@ -167,6 +170,10 @@ export const KlineChart: React.FC = () => {
       window.removeEventListener('resize', resizeChart);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange as never);
       chart.unsubscribeCrosshairMove(handleCrosshairMove);
+      if (historyPagingArmFrameRef.current !== null) {
+        window.cancelAnimationFrame(historyPagingArmFrameRef.current);
+      }
+      isHistoryPagingReadyRef.current = false;
       previousDataRef.current = [];
       chart.remove();
     };
@@ -241,8 +248,16 @@ export const KlineChart: React.FC = () => {
     });
 
     if (updateMode === 'replace') {
+      isHistoryPagingReadyRef.current = false;
+      if (historyPagingArmFrameRef.current !== null) {
+        window.cancelAnimationFrame(historyPagingArmFrameRef.current);
+      }
       candleSeriesRef.current.setData(data);
       chartRef.current?.timeScale().fitContent();
+      historyPagingArmFrameRef.current = window.requestAnimationFrame(() => {
+        isHistoryPagingReadyRef.current = true;
+        historyPagingArmFrameRef.current = null;
+      });
     } else if (updateMode === 'prepend') {
       const visibleRange = chartRef.current?.timeScale().getVisibleLogicalRange();
       const prependedCount = data.length - previousData.length;

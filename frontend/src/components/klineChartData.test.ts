@@ -43,12 +43,24 @@ describe('resolveChartUpdateMode', () => {
 });
 
 describe('shouldLoadOlderKlines', () => {
+  it('does not load older history before history paging is armed', () => {
+    expect(
+      shouldLoadOlderKlines({
+        visibleFrom: 20,
+        isLoadingOlderKlines: false,
+        hasMoreHistoricalKlines: true,
+        isHistoryPagingReady: false,
+      }),
+    ).toBe(false);
+  });
+
   it('loads older history when the visible range reaches the left edge threshold', () => {
     expect(
       shouldLoadOlderKlines({
         visibleFrom: 20,
         isLoadingOlderKlines: false,
         hasMoreHistoricalKlines: true,
+        isHistoryPagingReady: true,
       }),
     ).toBe(true);
   });
@@ -59,6 +71,7 @@ describe('shouldLoadOlderKlines', () => {
         visibleFrom: 20,
         isLoadingOlderKlines: true,
         hasMoreHistoricalKlines: true,
+        isHistoryPagingReady: true,
       }),
     ).toBe(false);
   });
