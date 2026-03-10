@@ -33,6 +33,8 @@ import {
 } from '../lib/chartViewState';
 import type { Kline } from '../types';
 
+const MIN_CHART_HEIGHT = 460;
+
 export const KlineChart: React.FC = () => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -65,7 +67,7 @@ export const KlineChart: React.FC = () => {
     }
 
     const initialTheme = getChartTheme(theme);
-    const initialHeight = Math.max(chartContainerRef.current.clientHeight, 520);
+    const initialHeight = Math.max(chartContainerRef.current.clientHeight, MIN_CHART_HEIGHT);
     const chart = createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth,
       height: initialHeight,
@@ -126,6 +128,7 @@ export const KlineChart: React.FC = () => {
       priceLineVisible: false,
       lastValueVisible: false,
     });
+
     volumeSeries.priceScale().applyOptions({
       scaleMargins: {
         top: 0.78,
@@ -145,7 +148,7 @@ export const KlineChart: React.FC = () => {
       if (chartContainerRef.current) {
         chart.applyOptions({
           width: chartContainerRef.current.clientWidth,
-          height: Math.max(chartContainerRef.current.clientHeight, 520),
+          height: Math.max(chartContainerRef.current.clientHeight, MIN_CHART_HEIGHT),
         });
       }
     };
@@ -285,6 +288,7 @@ export const KlineChart: React.FC = () => {
       if (historyPagingArmFrameRef.current !== null) {
         window.cancelAnimationFrame(historyPagingArmFrameRef.current);
       }
+
       candleSeriesRef.current.setData(data);
       const firstTime = normalizeChartTimeValue(data[0]?.time);
       const lastTime = normalizeChartTimeValue(nextLast?.time);
@@ -302,15 +306,14 @@ export const KlineChart: React.FC = () => {
           lastTime,
         })
       ) {
-        const restoredVisibleRange = storedVisibleRange;
-
         chartRef.current.timeScale().setVisibleRange({
-          from: restoredVisibleRange.from as Time,
-          to: restoredVisibleRange.to as Time,
+          from: storedVisibleRange.from as Time,
+          to: storedVisibleRange.to as Time,
         });
       } else {
         chartRef.current?.timeScale().fitContent();
       }
+
       historyPagingArmFrameRef.current = window.requestAnimationFrame(() => {
         isHistoryPagingReadyRef.current = true;
         historyPagingArmFrameRef.current = null;
@@ -383,19 +386,17 @@ export const KlineChart: React.FC = () => {
 
   return (
     <section className="chart-panel chart-workspace">
-      <div className="chart-workspace__toolbar">
-        <div className="chart-workspace__toolbar-shell">
-          <div className="chart-workspace__toolbar-main">
-            <Toolbar />
-          </div>
-          <div className="chart-workspace__toolbar-side">
-            <IndicatorSettingsButton
-              settings={indicatorSettings}
-              onToggle={(indicatorId, enabled) => {
-                void updateIndicatorSetting(indicatorId, enabled);
-              }}
-            />
-          </div>
+      <div className="chart-workspace__header">
+        <div className="chart-workspace__header-main">
+          <Toolbar />
+        </div>
+        <div className="chart-workspace__header-actions">
+          <IndicatorSettingsButton
+            settings={indicatorSettings}
+            onToggle={(indicatorId, enabled) => {
+              void updateIndicatorSetting(indicatorId, enabled);
+            }}
+          />
         </div>
       </div>
 

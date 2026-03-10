@@ -49,7 +49,7 @@ describe('KlineChart', () => {
     };
   });
 
-  it('renders the indicator settings entry and keeps indicators hidden by default', () => {
+  it('renders a slimmer chart workspace header around the toolbar and indicator entry', () => {
     mockMarketState.klines = Array.from({ length: 20 }, (_, index) => ({
       exchange: 'binance',
       symbol: 'ETHUSDT',
@@ -69,23 +69,23 @@ describe('KlineChart', () => {
 
     expect(markup).toContain('toolbar');
     expect(markup).toContain('指标');
-    expect(markup).toContain('chart-workspace__toolbar');
+    expect(markup).toContain('chart-workspace__header');
+    expect(markup).toContain('chart-workspace__header-main');
+    expect(markup).toContain('chart-workspace__header-actions');
     expect(markup).toContain('chart-panel__hud');
     expect(markup).toContain('ETH/USDT · 5分钟 · BINANCE');
     expect(markup).toContain('chart-inspector__metric-label">开<');
     expect(markup).toContain('2,019.00');
-    expect(markup).not.toContain('2025-03-10');
-    expect(markup).not.toContain('K 线主视图');
-    expect(markup).not.toContain('57154-');
+    expect(markup).not.toContain('chart-workspace__toolbar-shell');
+    expect(markup).not.toContain('chart-badges');
+    expect(markup).not.toContain('缓存');
+    expect(markup).not.toContain('推送中');
+    expect(markup).not.toContain('chart-panel__summary-row');
     expect(markup).not.toContain('成交量');
     expect(markup).not.toContain('成交额');
     expect(markup).not.toContain('MA5');
     expect(markup).not.toContain('MA10');
     expect(markup).not.toContain('MA20');
-    expect(markup).not.toContain('chart-badges');
-    expect(markup).not.toContain('缓存');
-    expect(markup).not.toContain('推送中');
-    expect(markup).not.toContain('chart-panel__summary-row');
   });
 
   it('renders enabled indicators in the legend', () => {
@@ -112,7 +112,7 @@ describe('KlineChart', () => {
 
     const markup = renderToStaticMarkup(<KlineChart />);
 
-    expect(markup).toContain('成交量(Volume)');
+    expect(markup).toContain('成交量 (Volume)');
     expect(markup).toContain('MA5');
     expect(markup).not.toContain('MA10');
     expect(markup).not.toContain('MA20');

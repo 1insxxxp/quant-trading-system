@@ -36,7 +36,7 @@ export const Toolbar: React.FC = () => {
 
   const symbolOptions = symbols.length > 0
     ? symbols
-    : [{ value: '', label: isLoadingSymbols ? '加载中…' : '暂无交易对' }];
+    : [{ value: '', label: isLoadingSymbols ? '加载中...' : '暂无交易对' }];
 
   const exchangeOptions: MarketSelectOption[] = EXCHANGES.map((exchangeOption) => ({
     value: exchangeOption.value,

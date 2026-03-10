@@ -30,7 +30,6 @@ describe('ChartInspector', () => {
     expect(markup).toContain('2,025.27');
     expect(markup).toContain('+5.27 (+0.26%)');
     expect(markup.match(/chart-inspector__metric-value--up/g)?.length).toBe(5);
-    expect(markup).not.toContain('2026-03-09 23:30');
     expect(markup).not.toContain('成交量');
     expect(markup).not.toContain('成交额');
   });

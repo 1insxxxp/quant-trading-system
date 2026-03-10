@@ -37,21 +37,22 @@ describe('SystemTopbar', () => {
     vi.useRealTimers();
   });
 
-  it('renders the live market title in place of the workspace title', () => {
+  it('renders a compact utility strip around the live market readout', () => {
     const markup = renderToStaticMarkup(<SystemTopbar />);
 
-    expect(markup).toContain('Quant Trade System mark');
+    expect(markup).toContain('实时行情');
     expect(markup).toContain('$2,019.27');
     expect(markup).toContain('ETH/USDT');
     expect(markup).toContain('BINANCE');
     expect(markup).toContain('收起侧边栏');
-    expect(markup).toContain('aria-label="链路在线"');
+    expect(markup).toContain('aria-label="连接在线"');
     expect(markup).toContain('signal-light');
     expect(markup).toContain('系统时间');
     expect(markup).toContain('2026-03-09 23:16:17');
     expect(markup).toContain('aria-label="切换到亮色主题"');
-    expect(markup).not.toContain('实时更新中');
-    expect(markup).not.toContain('system-topbar__status-text');
+    expect(markup).toContain('system-topbar__utilities');
+    expect(markup).not.toContain('Quant Trade System mark');
     expect(markup).not.toContain('后台工作台');
+    expect(markup).not.toContain('system-topbar__brand-mark');
   });
 });

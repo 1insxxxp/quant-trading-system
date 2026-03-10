@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { formatLivePrice, formatMarketSymbol } from '../lib/marketDisplay';
 import { useMarketStore } from '../stores/marketStore';
 import { useUiStore } from '../stores/uiStore';
-import { BrandLogo } from './BrandLogo';
 
 function formatSystemTime(value: Date): string {
   return new Intl.DateTimeFormat('sv-SE', {
@@ -26,9 +25,11 @@ export const SystemTopbar: React.FC = () => {
   const symbol = useMarketStore((state) => state.symbol);
   const latestPrice = useMarketStore((state) => state.latestPrice);
   const [systemTime, setSystemTime] = useState(() => formatSystemTime(new Date()));
-  const statusLabel = isConnected ? '链路在线' : '重连中';
+
   const marketLabel = `${formatMarketSymbol(symbol)} · ${exchange.toUpperCase()}`;
   const latestPriceLabel = latestPrice !== null ? formatLivePrice(latestPrice) : '等待价格';
+  const statusLabel = isConnected ? '连接在线' : '等待重连';
+  const themeLabel = theme === 'dark' ? '暗系' : '亮系';
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -63,7 +64,7 @@ export const SystemTopbar: React.FC = () => {
             )}
           </span>
         </button>
-        <BrandLogo variant="mark" className="system-topbar__brand-mark" />
+
         <div className="system-topbar__ticker">
           <span className="system-topbar__ticker-label">实时行情</span>
           <div className="system-topbar__ticker-main">
@@ -73,7 +74,7 @@ export const SystemTopbar: React.FC = () => {
         </div>
       </div>
 
-      <div className="system-topbar__meta">
+      <div className="system-topbar__utilities">
         <button
           type="button"
           className={`theme-toggle theme-toggle--${theme}`}
@@ -85,9 +86,9 @@ export const SystemTopbar: React.FC = () => {
             <span className="theme-toggle__thumb" />
           </span>
           <span className="theme-toggle__icon" aria-hidden="true">
-            {theme === 'dark' ? '☼' : '☾'}
+            {theme === 'dark' ? '☾' : '☼'}
           </span>
-          <span className="theme-toggle__label">{theme === 'dark' ? '亮系' : '暗系'}</span>
+          <span className="theme-toggle__label">{themeLabel}</span>
         </button>
 
         <div className="system-topbar__clock" role="timer" aria-live="polite">
@@ -96,10 +97,7 @@ export const SystemTopbar: React.FC = () => {
         </div>
 
         <div className="system-topbar__status" role="status" aria-live="polite" aria-label={statusLabel}>
-          <span
-            className={`signal-light signal-light--${isConnected ? 'live' : 'waiting'}`}
-            aria-hidden="true"
-          />
+          <span className={`signal-light signal-light--${isConnected ? 'live' : 'waiting'}`} aria-hidden="true" />
         </div>
       </div>
     </header>
