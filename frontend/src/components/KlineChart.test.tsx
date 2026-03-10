@@ -71,10 +71,10 @@ describe('KlineChart', () => {
     expect(markup).toContain('指标');
     expect(markup).toContain('chart-workspace__toolbar');
     expect(markup).toContain('chart-panel__hud');
-    expect(markup).toContain('2025-03-10');
-    expect(markup).toContain('ETH/USDT · 5m · BINANCE');
-    expect(markup).toContain('chart-inspector__chip-label">开<');
+    expect(markup).toContain('ETH/USDT · 5分钟 · BINANCE');
+    expect(markup).toContain('chart-inspector__metric-label">开<');
     expect(markup).toContain('2,019.00');
+    expect(markup).not.toContain('2025-03-10');
     expect(markup).not.toContain('K 线主视图');
     expect(markup).not.toContain('57154-');
     expect(markup).not.toContain('成交量');
@@ -112,10 +112,10 @@ describe('KlineChart', () => {
 
     const markup = renderToStaticMarkup(<KlineChart />);
 
-    expect(markup).toContain('成交量');
-    expect(markup).toContain('成交额');
+    expect(markup).toContain('成交量(Volume)');
     expect(markup).toContain('MA5');
     expect(markup).not.toContain('MA10');
     expect(markup).not.toContain('MA20');
+    expect(markup).not.toContain('成交额');
   });
 });

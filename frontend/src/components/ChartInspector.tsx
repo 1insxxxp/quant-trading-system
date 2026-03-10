@@ -1,21 +1,17 @@
 import React from 'react';
 
 export interface ChartInspectorSnapshot {
-  timeLabel: string;
   open: number;
   high: number;
   low: number;
   close: number;
   change: number;
   percent: number;
-  volume: number;
-  quoteVolume: number;
 }
 
 interface ChartInspectorProps {
   marketLabel: string;
   snapshot: ChartInspectorSnapshot | null;
-  showVolume: boolean;
 }
 
 function formatValue(value: number): string {
@@ -25,56 +21,69 @@ function formatValue(value: number): string {
   });
 }
 
-function renderChip(params: { label: string; value: string; accent?: boolean }) {
-  const { label, value, accent = false } = params;
+function formatSignedValue(value: number): string {
+  return `${value >= 0 ? '+' : ''}${formatValue(value)}`;
+}
+
+function resolveDirection(change: number): 'up' | 'down' | 'flat' {
+  if (change > 0) {
+    return 'up';
+  }
+
+  if (change < 0) {
+    return 'down';
+  }
+
+  return 'flat';
+}
+
+function renderMetric(params: {
+  label: string;
+  value: string;
+  tone?: 'up' | 'down' | 'flat';
+  wide?: boolean;
+}) {
+  const { label, value, tone = 'flat', wide = false } = params;
 
   return (
-    <span className={`chart-inspector__chip${accent ? ' chart-inspector__chip--accent' : ''}`}>
-      <span className="chart-inspector__chip-label">{label}</span>
-      <span className="chart-inspector__value">{value}</span>
+    <span className={`chart-inspector__metric${wide ? ' chart-inspector__metric--wide' : ''}`}>
+      <span className="chart-inspector__metric-label">{label}</span>
+      <span className={`chart-inspector__metric-value chart-inspector__metric-value--${tone}`}>{value}</span>
     </span>
   );
 }
 
-export const ChartInspector: React.FC<ChartInspectorProps> = ({
-  marketLabel,
-  snapshot,
-  showVolume,
-}) => {
+export const ChartInspector: React.FC<ChartInspectorProps> = ({ marketLabel, snapshot }) => {
   if (!snapshot) {
     return (
       <aside className="chart-inspector">
-        <div className="chart-inspector__headline">
-          <strong className="chart-inspector__market">{marketLabel}</strong>
-        </div>
+        <strong className="chart-inspector__market">{marketLabel}</strong>
         <strong className="chart-inspector__empty">等待 K 线数据</strong>
       </aside>
     );
   }
 
+  const direction = resolveDirection(snapshot.change);
+
   return (
-    <aside className="chart-inspector">
-      <div className="chart-inspector__headline">
-        <strong className="chart-inspector__market">{marketLabel}</strong>
-        <strong className="chart-inspector__time">{snapshot.timeLabel}</strong>
-      </div>
-      <div className="chart-inspector__ohlc">
-        {renderChip({ label: '开', value: formatValue(snapshot.open) })}
-        {renderChip({ label: '高', value: formatValue(snapshot.high) })}
-        {renderChip({ label: '低', value: formatValue(snapshot.low) })}
-        {renderChip({ label: '收', value: formatValue(snapshot.close) })}
-        {renderChip({
+    <aside className={`chart-inspector chart-inspector--${direction}`}>
+      <strong className="chart-inspector__market">{marketLabel}</strong>
+      <div className="chart-inspector__metrics">
+        {renderMetric({ label: '开', value: formatValue(snapshot.open), tone: direction })}
+        {renderMetric({ label: '高', value: formatValue(snapshot.high), tone: direction })}
+        {renderMetric({ label: '低', value: formatValue(snapshot.low), tone: direction })}
+        {renderMetric({
+          label: '收',
+          value: formatValue(snapshot.close),
+          tone: direction,
+        })}
+        {renderMetric({
           label: '涨跌',
-          value: `${snapshot.change >= 0 ? '+' : ''}${formatValue(snapshot.change)} (${snapshot.percent.toFixed(2)}%)`,
-          accent: true,
+          value: `${formatSignedValue(snapshot.change)} (${snapshot.percent >= 0 ? '+' : ''}${snapshot.percent.toFixed(2)}%)`,
+          tone: direction,
+          wide: true,
         })}
       </div>
-      {showVolume ? (
-        <div className="chart-inspector__meta">
-          {renderChip({ label: '成交量', value: formatValue(snapshot.volume) })}
-          {renderChip({ label: '成交额', value: formatValue(snapshot.quoteVolume) })}
-        </div>
-      ) : null}
     </aside>
   );
 };

@@ -316,8 +316,8 @@ describe('marketStore', () => {
     expect(useMarketStore.getState().klines).toEqual([]);
     expect(useMarketStore.getState().klineSource).toBe('empty');
     expect((useMarketStore.getState() as any).symbols).toEqual([
-      { value: 'BTCUSDT', label: 'BTC/USDT' },
-      { value: 'ETHUSDT', label: 'ETH/USDT' },
+      { value: 'BTCUSDT', label: 'BTC/USDT', baseAsset: 'BTC', quoteAsset: 'USDT' },
+      { value: 'ETHUSDT', label: 'ETH/USDT', baseAsset: 'ETH', quoteAsset: 'USDT' },
     ]);
   });
 
@@ -396,8 +396,8 @@ describe('marketStore', () => {
     await (useMarketStore.getState() as any).fetchSymbols();
 
     expect((useMarketStore.getState() as any).symbols).toEqual([
-      { value: 'BTCUSDT', label: 'BTC/USDT' },
-      { value: 'ETHUSDT', label: 'ETH/USDT' },
+      { value: 'BTCUSDT', label: 'BTC/USDT', baseAsset: 'BTC', quoteAsset: 'USDT' },
+      { value: 'ETHUSDT', label: 'ETH/USDT', baseAsset: 'ETH', quoteAsset: 'USDT' },
     ]);
     expect((useMarketStore.getState() as any).isLoadingSymbols).toBe(false);
   });
@@ -441,8 +441,8 @@ describe('marketStore', () => {
     await (useMarketStore.getState() as any).fetchSymbols();
 
     expect((useMarketStore.getState() as any).symbols).toEqual([
-      { value: 'BTCUSDT', label: 'BTC/USDT' },
-      { value: 'ETHUSDT', label: 'ETH/USDT' },
+      { value: 'BTCUSDT', label: 'BTC/USDT', baseAsset: 'BTC', quoteAsset: 'USDT' },
+      { value: 'ETHUSDT', label: 'ETH/USDT', baseAsset: 'ETH', quoteAsset: 'USDT' },
     ]);
     expect((useMarketStore.getState() as any).isLoadingSymbols).toBe(false);
   });

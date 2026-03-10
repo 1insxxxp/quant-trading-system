@@ -35,14 +35,6 @@ export function buildIndicatorLegend(
 ): ChartLegendItem[] {
   const items: ChartLegendItem[] = [];
 
-  if (settings.volume) {
-    items.push({
-      label: '成交量',
-      colorClass: 'chart-indicator--volume',
-      value: null,
-    });
-  }
-
   if (settings.ma5) {
     const series = buildMovingAverageSeries(klines, 5);
     items.push({

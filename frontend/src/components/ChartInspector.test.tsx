@@ -3,60 +3,55 @@ import { describe, expect, it } from 'vitest';
 import { ChartInspector } from './ChartInspector';
 
 describe('ChartInspector', () => {
-  it('renders the latest candle details', () => {
+  it('renders the latest candle details as an inline hud row', () => {
     const markup = renderToStaticMarkup(
       <ChartInspector
-        marketLabel="BINANCE / ETH/USDT / 5m"
+        marketLabel="ETH/USDT · 5分钟 · BINANCE"
         snapshot={{
-          timeLabel: '2026-03-09 23:30',
           open: 2020,
           high: 2035,
           low: 2012,
           close: 2025.27,
           change: 5.27,
           percent: 0.26,
-          volume: 320.5,
-          quoteVolume: 649244.04,
         }}
-        showVolume
       />,
     );
 
-    expect(markup).toContain('BINANCE / ETH/USDT / 5m');
-    expect(markup).toContain('2026-03-09 23:30');
-    expect(markup).toContain('chart-inspector__chip-label">开<');
-    expect(markup).toContain('chart-inspector__chip-label">高<');
-    expect(markup).toContain('chart-inspector__chip-label">低<');
-    expect(markup).toContain('chart-inspector__chip-label">收<');
-    expect(markup).toContain('chart-inspector__chip-label">涨跌<');
+    expect(markup).toContain('ETH/USDT · 5分钟 · BINANCE');
+    expect(markup).toContain('chart-inspector__metric-label">开<');
+    expect(markup).toContain('chart-inspector__metric-label">高<');
+    expect(markup).toContain('chart-inspector__metric-label">低<');
+    expect(markup).toContain('chart-inspector__metric-label">收<');
+    expect(markup).toContain('chart-inspector__metric-label">涨跌<');
     expect(markup).toContain('2,020.00');
     expect(markup).toContain('2,035.00');
     expect(markup).toContain('2,012.00');
     expect(markup).toContain('2,025.27');
-    expect(markup).toContain('+5.27 (0.26%)');
-    expect(markup).toContain('649,244.04');
+    expect(markup).toContain('+5.27 (+0.26%)');
+    expect(markup.match(/chart-inspector__metric-value--up/g)?.length).toBe(5);
+    expect(markup).not.toContain('2026-03-09 23:30');
+    expect(markup).not.toContain('成交量');
+    expect(markup).not.toContain('成交额');
   });
 
-  it('hides volume fields when the volume indicator is disabled', () => {
+  it('renders down candles with a negative direction class', () => {
     const markup = renderToStaticMarkup(
       <ChartInspector
-        marketLabel="BINANCE / ETH/USDT / 5m"
+        marketLabel="ETH/USDT · 1小时 · OKX"
         snapshot={{
-          timeLabel: '2026-03-09 23:30',
           open: 2020,
           high: 2035,
           low: 2012,
-          close: 2025.27,
-          change: 5.27,
-          percent: 0.26,
-          volume: 320.5,
-          quoteVolume: 649244.04,
+          close: 2012.1,
+          change: -7.9,
+          percent: -0.39,
         }}
-        showVolume={false}
       />,
     );
 
-    expect(markup).not.toContain('成交量');
-    expect(markup).not.toContain('成交额');
+    expect(markup).toContain('chart-inspector--down');
+    expect(markup.match(/chart-inspector__metric-value--down/g)?.length).toBe(5);
+    expect(markup).toContain('-7.90 (-0.39%)');
   });
 });

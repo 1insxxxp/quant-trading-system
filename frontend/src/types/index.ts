@@ -26,6 +26,8 @@ export type KlineSource = 'remote' | 'cache' | 'demo' | 'empty';
 export interface SymbolOption {
   value: string;
   label: string;
+  baseAsset?: string;
+  quoteAsset?: string;
 }
 
 export type IndicatorId = 'volume' | 'ma5' | 'ma10' | 'ma20';

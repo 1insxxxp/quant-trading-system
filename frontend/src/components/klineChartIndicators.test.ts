@@ -66,6 +66,6 @@ describe('klineChartIndicators', () => {
       ma5: true,
       ma10: false,
       ma20: false,
-    }).map((item) => item.label)).toEqual(['成交量', 'MA5']);
+    }).map((item) => item.label)).toEqual(['MA5']);
   });
 });

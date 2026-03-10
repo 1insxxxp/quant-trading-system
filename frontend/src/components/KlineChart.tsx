@@ -8,6 +8,12 @@ import {
   type Time,
 } from 'lightweight-charts';
 import { formatMarketSymbol } from '../lib/marketDisplay';
+import {
+  formatChartCrosshairTime,
+  formatChartIntervalLabel,
+  formatChartVolumeLegendValue,
+  resolveTimestampFromChartTime,
+} from '../lib/chartTimeFormat';
 import { useMarketStore } from '../stores/marketStore';
 import { type ThemeMode, useUiStore } from '../stores/uiStore';
 import { ChartInspector, type ChartInspectorSnapshot } from './ChartInspector';
@@ -39,7 +45,7 @@ export const KlineChart: React.FC = () => {
   const previousMarketKeyRef = useRef<string | null>(null);
   const isHistoryPagingReadyRef = useRef(false);
   const historyPagingArmFrameRef = useRef<number | null>(null);
-  const [inspectorSnapshot, setInspectorSnapshot] = useState<ChartInspectorSnapshot | null>(null);
+  const [hoveredKline, setHoveredKline] = useState<Kline | null>(null);
   const theme = useUiStore((state) => state.theme);
 
   const {
@@ -72,6 +78,13 @@ export const KlineChart: React.FC = () => {
         },
         horzLine: {
           color: initialTheme.crosshairColor,
+        },
+      },
+      localization: {
+        timeFormatter: (time: Time) => {
+          const timestamp = resolveTimestampFromChartTime(time);
+
+          return timestamp === null ? '' : formatChartCrosshairTime(timestamp);
         },
       },
       timeScale: {
@@ -174,12 +187,10 @@ export const KlineChart: React.FC = () => {
     };
 
     const handleCrosshairMove = (param: MouseEventParams<Time>) => {
-      const activeKline = resolveKlineFromCrosshair({
+      setHoveredKline(resolveKlineFromCrosshair({
         param,
         klines: useMarketStore.getState().klines,
-      });
-
-      setInspectorSnapshot(buildInspectorSnapshot(activeKline));
+      }));
     };
 
     chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange as never);
@@ -360,12 +371,15 @@ export const KlineChart: React.FC = () => {
   }, [klines, exchange, symbol, interval, indicatorSettings]);
 
   useEffect(() => {
-    setInspectorSnapshot(buildInspectorSnapshot(klines[klines.length - 1] ?? null));
+    setHoveredKline(null);
   }, [klines, exchange, symbol, interval]);
 
   const legendItems = buildIndicatorLegend(klines, indicatorSettings);
-  const activeSnapshot = inspectorSnapshot ?? buildInspectorSnapshot(klines[klines.length - 1] ?? null);
-  const inspectorMarketLabel = `${formatMarketSymbol(symbol)} · ${interval} · ${exchange.toUpperCase()}`;
+  const activeKline = hoveredKline ?? klines[klines.length - 1] ?? null;
+  const activeSnapshot = buildInspectorSnapshot(activeKline);
+  const inspectorMarketLabel = `${formatMarketSymbol(symbol)} · ${formatChartIntervalLabel(interval)} · ${exchange.toUpperCase()}`;
+  const activeDirection =
+    activeSnapshot === null ? 'flat' : activeSnapshot.change > 0 ? 'up' : activeSnapshot.change < 0 ? 'down' : 'flat';
 
   return (
     <section className="chart-panel chart-workspace">
@@ -391,7 +405,6 @@ export const KlineChart: React.FC = () => {
           <ChartInspector
             marketLabel={inspectorMarketLabel}
             snapshot={activeSnapshot}
-            showVolume={indicatorSettings.volume}
           />
           {legendItems.length > 0 ? (
             <div className="chart-panel__hud-legend">
@@ -404,6 +417,15 @@ export const KlineChart: React.FC = () => {
             </div>
           ) : null}
         </div>
+
+        {indicatorSettings.volume && activeKline ? (
+          <div className={`chart-volume-legend chart-volume-legend--${activeDirection}`}>
+            <span className="chart-volume-legend__label">成交量(Volume)</span>
+            <span className="chart-volume-legend__value">
+              {formatChartVolumeLegendValue(activeKline.volume)}
+            </span>
+          </div>
+        ) : null}
 
         {isLoadingOlderKlines && !isLoadingKlines ? (
           <div className="chart-history-status" role="status" aria-live="polite">
@@ -443,22 +465,13 @@ function buildInspectorSnapshot(kline: Kline | null): ChartInspectorSnapshot | n
   }
 
   return {
-    timeLabel: formatKlineTimestamp(kline.open_time),
     open: kline.open,
     high: kline.high,
     low: kline.low,
     close: kline.close,
     change: kline.close - kline.open,
-    percent: ((kline.close - kline.open) / kline.open) * 100,
-    volume: kline.volume,
-    quoteVolume: kline.quote_volume,
+    percent: kline.open === 0 ? 0 : ((kline.close - kline.open) / kline.open) * 100,
   };
-}
-
-function formatKlineTimestamp(timestamp: number): string {
-  const normalized = timestamp >= 1_000_000_000_000 ? timestamp : timestamp * 1000;
-
-  return new Date(normalized).toLocaleString('sv-SE');
 }
 
 function getChartTheme(theme: ThemeMode) {

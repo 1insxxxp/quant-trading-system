@@ -14,12 +14,13 @@ describe('chart workspace theme styles', () => {
     expect(toolbarShellBlock?.[0]).toContain('overflow: visible;');
   });
 
-  it('keeps chart inspector chips fixed-width and number values tabular', () => {
-    const chipBlock = css.match(/\.chart-inspector__chip\s*\{[^}]*\}/);
+  it('keeps the inline chart hud transparent and number values tabular', () => {
+    const inspectorBlock = css.match(/\.chart-inspector\s*\{[^}]*\}/);
+    const metricsBlock = css.match(/\.chart-inspector__metrics\s*\{[^}]*\}/);
 
-    expect(chipBlock?.[0]).toContain('min-width:');
-    expect(chipBlock?.[0]).toContain('justify-content: space-between;');
-    expect(css).toContain('.chart-inspector__value');
+    expect(inspectorBlock?.[0]).toContain('background: transparent;');
+    expect(metricsBlock?.[0]).toContain('gap: 6px 10px;');
+    expect(css).toContain('.chart-inspector__metric-value');
     expect(css).toContain('font-variant-numeric: tabular-nums;');
   });
 
@@ -27,5 +28,12 @@ describe('chart workspace theme styles', () => {
     const metaBlock = css.match(/\.system-topbar__meta\s*\{[^}]*\}/);
 
     expect(metaBlock?.[0]).toContain('display: grid;');
+  });
+
+  it('positions the volume legend against the volume pane', () => {
+    const legendBlock = css.match(/\.chart-volume-legend\s*\{[^}]*\}/);
+
+    expect(legendBlock?.[0]).toContain('top: calc(78% + 12px);');
+    expect(legendBlock?.[0]).toContain('left: 18px;');
   });
 });

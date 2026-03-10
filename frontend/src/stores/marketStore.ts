@@ -20,8 +20,8 @@ export const DEFAULT_INDICATOR_SETTINGS: IndicatorSettings = {
 };
 
 const DEFAULT_SYMBOLS: SymbolOption[] = [
-  { value: 'BTCUSDT', label: 'BTC/USDT' },
-  { value: 'ETHUSDT', label: 'ETH/USDT' },
+  { value: 'BTCUSDT', label: 'BTC/USDT', baseAsset: 'BTC', quoteAsset: 'USDT' },
+  { value: 'ETHUSDT', label: 'ETH/USDT', baseAsset: 'ETH', quoteAsset: 'USDT' },
 ];
 
 const DEFAULT_MARKET_SELECTION = {
@@ -498,6 +498,8 @@ function normalizeSymbols(
       label: item.base_asset && item.quote_asset
         ? `${item.base_asset}/${item.quote_asset}`
         : formatMarketSymbol(item.symbol),
+      baseAsset: item.base_asset,
+      quoteAsset: item.quote_asset,
     }));
 }
 

@@ -1,5 +1,7 @@
 import React, { useEffect } from 'react';
 import { useMarketStore } from '../stores/marketStore';
+import { ExchangeIcon, AssetIcon } from './marketIcons';
+import { MarketSelect, type MarketSelectOption } from './MarketSelect';
 
 const EXCHANGES = [
   { value: 'binance', label: 'Binance' },
@@ -36,41 +38,40 @@ export const Toolbar: React.FC = () => {
     ? symbols
     : [{ value: '', label: isLoadingSymbols ? '加载中…' : '暂无交易对' }];
 
+  const exchangeOptions: MarketSelectOption[] = EXCHANGES.map((exchangeOption) => ({
+    value: exchangeOption.value,
+    label: exchangeOption.label,
+    icon: <ExchangeIcon exchange={exchangeOption.value} />,
+  }));
+
+  const marketSymbolOptions: MarketSelectOption[] = symbolOptions.map((symbolOption) => ({
+    value: symbolOption.value,
+    label: symbolOption.label,
+    icon: <AssetIcon asset={symbolOption.baseAsset ?? resolveBaseAsset(symbolOption)} />,
+    disabled: symbolOption.value === '',
+  }));
+
   return (
     <div className="toolbar-inline toolbar-inline--terminal">
       <div className="toolbar-field toolbar-field--terminal">
-        <label className="toolbar-label" htmlFor="exchange-select">交易所</label>
-        <select
-          id="exchange-select"
+        <MarketSelect
+          label="交易所"
           value={exchange}
-          onChange={(event) => setExchange(event.target.value)}
-          className="toolbar-select toolbar-select--terminal"
-          data-testid="exchange-select"
-        >
-          {EXCHANGES.map((exchangeOption) => (
-            <option key={exchangeOption.value} value={exchangeOption.value}>
-              {exchangeOption.label}
-            </option>
-          ))}
-        </select>
+          options={exchangeOptions}
+          onChange={setExchange}
+          testId="exchange-select"
+        />
       </div>
 
       <div className="toolbar-field toolbar-field--terminal">
-        <label className="toolbar-label" htmlFor="symbol-select">交易对</label>
-        <select
-          id="symbol-select"
+        <MarketSelect
+          label="交易对"
           value={symbol}
-          onChange={(event) => setSymbol(event.target.value)}
-          className="toolbar-select toolbar-select--terminal"
-          data-testid="symbol-select"
-          disabled={symbolOptions.length === 0 || symbolOptions[0].value === ''}
-        >
-          {symbolOptions.map((symbolOption) => (
-            <option key={symbolOption.value || 'empty'} value={symbolOption.value}>
-              {symbolOption.label}
-            </option>
-          ))}
-        </select>
+          options={marketSymbolOptions}
+          onChange={setSymbol}
+          disabled={marketSymbolOptions.length === 0 || marketSymbolOptions[0]?.disabled === true}
+          testId="symbol-select"
+        />
       </div>
 
       <div className="toolbar-field toolbar-field--terminal">
@@ -92,3 +93,13 @@ export const Toolbar: React.FC = () => {
     </div>
   );
 };
+
+function resolveBaseAsset(symbolOption: { value: string; label: string }) {
+  const labelBase = symbolOption.label.split('/')[0];
+
+  if (labelBase) {
+    return labelBase.toUpperCase();
+  }
+
+  return symbolOption.value.replace(/USDT$/i, '').slice(0, 6).toUpperCase();
+}
