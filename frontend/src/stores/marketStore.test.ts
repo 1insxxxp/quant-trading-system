@@ -42,20 +42,21 @@ describe('marketStore', () => {
         interval: '1h',
         klines: [],
         latestPrice: null,
-      isConnected: false,
-      isLoadingKlines: false,
-      isLoadingOlderKlines: false,
-      hasMoreHistoricalKlines: true,
-      indicatorSettings: {
-        volume: false,
-        ma5: false,
-        ma10: false,
-        ma20: false,
-      } satisfies IndicatorSettings,
-      isLoadingIndicatorSettings: false,
-    },
-    true,
-  );
+        lastPriceTimestamp: null,
+        isConnected: false,
+        isLoadingKlines: false,
+        isLoadingOlderKlines: false,
+        hasMoreHistoricalKlines: true,
+        indicatorSettings: {
+          volume: false,
+          ma5: false,
+          ma10: false,
+          ma20: false,
+        } satisfies IndicatorSettings,
+        isLoadingIndicatorSettings: false,
+      },
+      true,
+    );
     vi.restoreAllMocks();
   });
 
@@ -335,6 +336,37 @@ describe('marketStore', () => {
     expect(useMarketStore.getState().klines).toEqual([
       makeKline({ exchange: 'okx', symbol: 'ETHUSDT', interval: '5m', open_time: 5 }),
     ]);
+  });
+
+  it('updates the latest price independently without mutating the loaded klines', () => {
+    const existingKlines = [
+      makeKline({ open_time: 100, close_time: 101, close: 110 }),
+      makeKline({ open_time: 200, close_time: 201, close: 120 }),
+    ];
+
+    useMarketStore.setState({
+      klines: existingKlines,
+      latestPrice: 120,
+      lastPriceTimestamp: 2000,
+    } as Partial<ReturnType<typeof useMarketStore.getState>>);
+
+    useMarketStore.getState().setLatestPrice(125, 3000);
+
+    expect(useMarketStore.getState().latestPrice).toBe(125);
+    expect(useMarketStore.getState().lastPriceTimestamp).toBe(3000);
+    expect(useMarketStore.getState().klines).toEqual(existingKlines);
+  });
+
+  it('ignores stale latest-price updates that arrive out of order', () => {
+    useMarketStore.setState({
+      latestPrice: 125,
+      lastPriceTimestamp: 3000,
+    } as Partial<ReturnType<typeof useMarketStore.getState>>);
+
+    useMarketStore.getState().setLatestPrice(121, 2500);
+
+    expect(useMarketStore.getState().latestPrice).toBe(125);
+    expect(useMarketStore.getState().lastPriceTimestamp).toBe(3000);
   });
 
   it('loads backend symbols for the active exchange and keeps only BTC/ETH pairs', async () => {

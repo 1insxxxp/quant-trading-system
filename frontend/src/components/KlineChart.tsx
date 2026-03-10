@@ -259,7 +259,7 @@ export const KlineChart: React.FC = () => {
       return;
     }
 
-    const data = buildCandlestickData(klines);
+    const data = buildCandlestickData(klines, interval);
     const previousData = previousDataRef.current;
     const nextLast = data[data.length - 1];
     const updateMode = resolveChartUpdateMode({
@@ -314,6 +314,26 @@ export const KlineChart: React.FC = () => {
         chartRef.current.timeScale().setVisibleLogicalRange({
           from: visibleRange.from + prependedCount,
           to: visibleRange.to + prependedCount,
+        });
+      }
+    } else if (updateMode === 'repair') {
+      const visibleRange = chartRef.current?.timeScale().getVisibleLogicalRange();
+      const addedCount = data.length - previousData.length;
+      const previousLastLogical = previousData.length - 1;
+      const isNearRealtime = Boolean(
+        visibleRange &&
+        previousLastLogical >= 0 &&
+        visibleRange.to >= previousLastLogical - 5,
+      );
+
+      candleSeriesRef.current.setData(data);
+
+      if (isNearRealtime) {
+        chartRef.current?.timeScale().scrollToRealTime();
+      } else if (visibleRange && chartRef.current) {
+        chartRef.current.timeScale().setVisibleLogicalRange({
+          from: visibleRange.from,
+          to: visibleRange.to + Math.max(0, addedCount),
         });
       }
     } else if (nextLast) {

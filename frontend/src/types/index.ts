@@ -14,6 +14,13 @@ export interface Kline {
   is_closed: number;
 }
 
+export interface PriceUpdate {
+  exchange: string;
+  symbol: string;
+  price: number;
+  timestamp: number;
+}
+
 export type KlineSource = 'remote' | 'cache' | 'demo' | 'empty';
 
 export interface SymbolOption {
@@ -32,6 +39,7 @@ export interface MarketState {
   klines: Kline[];
   klineSource: KlineSource;
   latestPrice: number | null;
+  lastPriceTimestamp: number | null;
   isConnected: boolean;
   symbols: SymbolOption[];
   isLoadingSymbols: boolean;
@@ -47,7 +55,7 @@ export interface MarketState {
   setInterval: (interval: string) => void;
   setKlines: (klines: Kline[]) => void;
   updateKline: (kline: Kline) => void;
-  setLatestPrice: (price: number) => void;
+  setLatestPrice: (price: number, timestamp?: number) => void;
   setIsConnected: (connected: boolean) => void;
   loadInitialKlines: () => Promise<void>;
   loadOlderKlines: () => Promise<void>;

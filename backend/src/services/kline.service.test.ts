@@ -202,4 +202,24 @@ describe('KlineService', () => {
     expect(result.klines.map((item) => item.open_time)).toEqual([2000, 3000]);
     expect(result.hasMore).toBe(true);
   });
+
+  it('loads the missing interval range before a realtime trade resumes after a gap', async () => {
+    mockDb.getKlines.mockResolvedValue([
+      makeKline(120_000),
+      makeKline(180_000),
+    ]);
+
+    const service = new KlineService();
+
+    const result = await service.recoverGapKlines(
+      'binance',
+      'BTCUSDT',
+      '1m',
+      60_000,
+      240_000,
+    );
+
+    expect(mockDb.getKlines).toHaveBeenCalledWith('binance', 'BTCUSDT', '1m', 3, 240_000);
+    expect(result.map((item) => item.open_time)).toEqual([120_000, 180_000]);
+  });
 });

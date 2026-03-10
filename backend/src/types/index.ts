@@ -90,6 +90,13 @@ export interface TradeTick {
   timestamp: number;
 }
 
+export interface PriceUpdate {
+  exchange: string;
+  symbol: string;
+  price: number;
+  timestamp: number;
+}
+
 export interface ExchangeAdapter {
   getKlines(
     symbol: string,
@@ -127,7 +134,7 @@ export interface WsMessage {
   exchange?: string;
   symbol?: string;
   interval?: string;
-  data?: Kline | number | { message: string };
+  data?: Kline | PriceUpdate | number | { message: string };
   error?: string;
 }
 

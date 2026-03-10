@@ -5,6 +5,16 @@ import type { ExchangeAdapter, Kline, KlineQueryResult } from '../types/index.js
 import { syncStateService } from './sync-state.service.js';
 
 const DEFAULT_INITIAL_KLINE_LIMIT = 2000;
+const DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
+
+const INTERVAL_MS: Record<string, number> = {
+  '1m': 60 * 1000,
+  '5m': 5 * 60 * 1000,
+  '15m': 15 * 60 * 1000,
+  '1h': 60 * 60 * 1000,
+  '4h': 4 * 60 * 60 * 1000,
+  '1d': 24 * 60 * 60 * 1000,
+};
 
 export class KlineService {
   private adapters: Map<string, ExchangeAdapter>;
@@ -112,6 +122,37 @@ export class KlineService {
     return klines[0] ?? null;
   }
 
+  async recoverGapKlines(
+    exchange: string,
+    symbol: string,
+    interval: string,
+    fromExclusiveOpenTime: number,
+    toExclusiveOpenTime: number,
+  ): Promise<Kline[]> {
+    const intervalMs = getIntervalMs(interval);
+    const missingCount = Math.max(
+      0,
+      Math.floor((toExclusiveOpenTime - fromExclusiveOpenTime) / intervalMs) - 1,
+    );
+
+    if (missingCount === 0) {
+      return [];
+    }
+
+    const result = await this.getKlines(
+      exchange,
+      symbol,
+      interval,
+      missingCount,
+      toExclusiveOpenTime,
+    );
+
+    return normalizeKlines(result.klines).filter((kline) => (
+      kline.open_time > fromExclusiveOpenTime &&
+      kline.open_time < toExclusiveOpenTime
+    ));
+  }
+
   getExchanges(): string[] {
     return ['binance', 'okx'];
   }
@@ -194,4 +235,8 @@ function normalizeKlines(klines: Kline[]): Kline[] {
     });
 
   return [...deduped.values()];
+}
+
+function getIntervalMs(interval: string): number {
+  return INTERVAL_MS[interval] ?? DEFAULT_INTERVAL_MS;
 }

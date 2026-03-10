@@ -73,6 +73,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
   klines: [],
   klineSource: 'empty',
   latestPrice: null,
+  lastPriceTimestamp: null,
   isConnected: false,
   symbols: DEFAULT_SYMBOLS,
   isLoadingSymbols: false,
@@ -94,6 +95,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       return {
         exchange,
         latestPrice: null,
+        lastPriceTimestamp: null,
         isLoadingKlines: true,
         isLoadingOlderKlines: false,
         hasMoreHistoricalKlines: true,
@@ -113,6 +115,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       return {
         symbol,
         latestPrice: null,
+        lastPriceTimestamp: null,
         isLoadingKlines: true,
         isLoadingOlderKlines: false,
         hasMoreHistoricalKlines: true,
@@ -132,6 +135,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       return {
         interval,
         latestPrice: null,
+        lastPriceTimestamp: null,
         isLoadingKlines: true,
         isLoadingOlderKlines: false,
         hasMoreHistoricalKlines: true,
@@ -174,8 +178,21 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     });
   },
 
-  setLatestPrice: (price: number) => {
-    set({ latestPrice: price });
+  setLatestPrice: (price: number, timestamp?: number) => {
+    set((state) => {
+      if (
+        typeof timestamp === 'number' &&
+        typeof state.lastPriceTimestamp === 'number' &&
+        timestamp < state.lastPriceTimestamp
+      ) {
+        return state;
+      }
+
+      return {
+        latestPrice: price,
+        lastPriceTimestamp: typeof timestamp === 'number' ? timestamp : state.lastPriceTimestamp,
+      };
+    });
   },
 
   setIsConnected: (isConnected: boolean) => {
@@ -215,6 +232,8 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         set({
           klines: nextKlines,
           klineSource: resolveKlineSource(data.source, nextKlines),
+          latestPrice: nextKlines[nextKlines.length - 1]?.close ?? null,
+          lastPriceTimestamp: null,
           isLoadingKlines: false,
           isLoadingOlderKlines: false,
           hasMoreHistoricalKlines: data.hasMore ?? false,
@@ -226,6 +245,8 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       set({
         klines: [],
         klineSource: 'empty',
+        latestPrice: null,
+        lastPriceTimestamp: null,
         isLoadingKlines: false,
         isLoadingOlderKlines: false,
         hasMoreHistoricalKlines: false,
@@ -239,6 +260,8 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       set({
         klines: [],
         klineSource: 'empty',
+        latestPrice: null,
+        lastPriceTimestamp: null,
         isLoadingKlines: false,
         isLoadingOlderKlines: false,
         hasMoreHistoricalKlines: false,
@@ -504,7 +527,7 @@ function applySymbolOptions(
     symbol: resolvedSymbol,
     isLoadingSymbols: false,
     ...(resolvedSymbol !== currentSymbol
-      ? { latestPrice: null, isLoadingKlines: true }
+      ? { latestPrice: null, lastPriceTimestamp: null, isLoadingKlines: true }
       : {}),
   });
 

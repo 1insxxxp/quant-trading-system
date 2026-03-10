@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { createMarketSocketClient, type MarketSocketMessage } from '../lib/marketSocket';
 import { getMarketKey, useMarketStore } from '../stores/marketStore';
-import type { Kline } from '../types/index';
+import type { Kline, PriceUpdate } from '../types/index';
 
 export const useWebSocket = () => {
   const {
@@ -47,6 +47,20 @@ export const useWebSocket = () => {
         }
 
         switch (message.type) {
+          case 'price': {
+            const priceUpdate = message.data as PriceUpdate;
+
+            if (
+              message.exchange !== exchange ||
+              message.symbol !== symbol
+            ) {
+              return;
+            }
+
+            setLatestPrice(priceUpdate.price, priceUpdate.timestamp);
+            break;
+          }
+
           case 'kline': {
             const kline = message.data as Kline;
 
@@ -59,10 +73,6 @@ export const useWebSocket = () => {
             }
 
             updateKline(kline);
-
-            if (kline.close) {
-              setLatestPrice(kline.close);
-            }
             break;
           }
 

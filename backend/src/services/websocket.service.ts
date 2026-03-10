@@ -1,7 +1,7 @@
 import WebSocket, { WebSocketServer } from 'ws';
 import { BinanceAdapter } from '../exchanges/binance.js';
 import { OKXAdapter } from '../exchanges/okx.js';
-import type { ExchangeAdapter, Kline, WsMessage } from '../types/index.js';
+import type { ExchangeAdapter, Kline, PriceUpdate, WsMessage } from '../types/index.js';
 import { klineService } from './kline.service.js';
 import { MarketTradeStream } from './market-trade-stream.js';
 import { syncStateService } from './sync-state.service.js';
@@ -144,8 +144,26 @@ export class WebSocketService {
         loadSeedKline: async (activeInterval) => {
           return klineService.getLatestCachedKline(exchange, symbol, activeInterval);
         },
-        onEmit: (kline) => {
+        onEmitPrice: (priceUpdate) => {
+          this.broadcastPrice(exchange, symbol, priceUpdate);
+        },
+        onEmitKline: (kline) => {
           this.broadcastKline(exchange, symbol, kline.interval, kline);
+        },
+        persistClosedKlines: async (klines) => {
+          await this.persistRealtimeKlines(klines);
+        },
+        checkpointOpenKlines: async (klines) => {
+          await this.persistRealtimeKlines(klines);
+        },
+        recoverGapKlines: async (activeInterval, fromExclusiveOpenTime, toExclusiveOpenTime) => {
+          return klineService.recoverGapKlines(
+            exchange,
+            symbol,
+            activeInterval,
+            fromExclusiveOpenTime,
+            toExclusiveOpenTime,
+          );
         },
       });
 
@@ -187,15 +205,6 @@ export class WebSocketService {
     const subscriptionKey = this.getSubscriptionKey(exchange, symbol, interval);
     const subscribers = this.subscriptions.get(subscriptionKey);
 
-    void klineService.saveKline(kline)
-      .then(async () => {
-        await syncStateService.recordRealtimeSyncSuccess(kline);
-      })
-      .catch(async (error) => {
-        console.error('Failed to persist realtime kline:', error);
-        await syncStateService.recordRealtimeSyncError(kline, error);
-      });
-
     if (!subscribers || subscribers.size === 0) {
       return;
     }
@@ -206,6 +215,57 @@ export class WebSocketService {
       symbol,
       interval,
       data: kline,
+    } satisfies WsMessage);
+
+    subscribers.forEach((ws) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(payload);
+      }
+    });
+  }
+
+  private async persistRealtimeKlines(klines: Kline[]) {
+    if (klines.length === 0) {
+      return;
+    }
+
+    try {
+      await klineService.saveKlines(klines);
+      await Promise.all(
+        klines.map(async (kline) => {
+          await syncStateService.recordRealtimeSyncSuccess(kline);
+        }),
+      );
+    } catch (error) {
+      console.error('Failed to persist realtime kline batch:', error);
+      await Promise.all(
+        klines.map(async (kline) => {
+          await syncStateService.recordRealtimeSyncError(kline, error);
+        }),
+      );
+    }
+  }
+
+  private broadcastPrice(exchange: string, symbol: string, priceUpdate: PriceUpdate) {
+    const subscribers = new Set<WebSocket>();
+
+    this.subscriptions.forEach((clients, key) => {
+      if (!key.startsWith(`${exchange}:${symbol}:`)) {
+        return;
+      }
+
+      clients.forEach((ws) => subscribers.add(ws));
+    });
+
+    if (subscribers.size === 0) {
+      return;
+    }
+
+    const payload = JSON.stringify({
+      type: 'price',
+      exchange,
+      symbol,
+      data: priceUpdate,
     } satisfies WsMessage);
 
     subscribers.forEach((ws) => {
