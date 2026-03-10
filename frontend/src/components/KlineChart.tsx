@@ -19,6 +19,12 @@ import {
   shouldLoadOlderKlines,
 } from './klineChartData';
 import { buildIndicatorLegend, syncIndicatorSeries } from './klineChartIndicators';
+import {
+  buildChartViewStateKey,
+  canRestoreChartVisibleRange,
+  readChartVisibleRange,
+  writeChartVisibleRange,
+} from '../lib/chartViewState';
 import type { Kline } from '../types';
 
 export const KlineChart: React.FC = () => {
@@ -153,6 +159,20 @@ export const KlineChart: React.FC = () => {
       }
     };
 
+    const handleVisibleTimeRangeChange = (
+      range: { from: Time; to: Time } | null,
+    ) => {
+      const chartVisibleRange = normalizeChartVisibleRange(range);
+
+      if (!chartVisibleRange) {
+        return;
+      }
+
+      const state = useMarketStore.getState();
+      const viewStateKey = buildChartViewStateKey(state.exchange, state.symbol, state.interval);
+      writeChartVisibleRange(viewStateKey, chartVisibleRange);
+    };
+
     const handleCrosshairMove = (param: MouseEventParams<Time>) => {
       const activeKline = resolveKlineFromCrosshair({
         param,
@@ -163,12 +183,14 @@ export const KlineChart: React.FC = () => {
     };
 
     chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange as never);
+    chart.timeScale().subscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange as never);
     chart.subscribeCrosshairMove(handleCrosshairMove);
 
     return () => {
       resizeObserver?.disconnect();
       window.removeEventListener('resize', resizeChart);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange as never);
+      chart.timeScale().unsubscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange as never);
       chart.unsubscribeCrosshairMove(handleCrosshairMove);
       if (historyPagingArmFrameRef.current !== null) {
         window.cancelAnimationFrame(historyPagingArmFrameRef.current);
@@ -253,7 +275,31 @@ export const KlineChart: React.FC = () => {
         window.cancelAnimationFrame(historyPagingArmFrameRef.current);
       }
       candleSeriesRef.current.setData(data);
-      chartRef.current?.timeScale().fitContent();
+      const firstTime = normalizeChartTimeValue(data[0]?.time);
+      const lastTime = normalizeChartTimeValue(nextLast?.time);
+      const storedVisibleRange = readChartVisibleRange(
+        buildChartViewStateKey(exchange, symbol, interval),
+      );
+
+      if (
+        chartRef.current &&
+        firstTime !== null &&
+        lastTime !== null &&
+        storedVisibleRange !== null &&
+        canRestoreChartVisibleRange(storedVisibleRange, {
+          firstTime,
+          lastTime,
+        })
+      ) {
+        const restoredVisibleRange = storedVisibleRange;
+
+        chartRef.current.timeScale().setVisibleRange({
+          from: restoredVisibleRange.from as Time,
+          to: restoredVisibleRange.to as Time,
+        });
+      } else {
+        chartRef.current?.timeScale().fitContent();
+      }
       historyPagingArmFrameRef.current = window.requestAnimationFrame(() => {
         isHistoryPagingReadyRef.current = true;
         historyPagingArmFrameRef.current = null;
@@ -452,4 +498,25 @@ function resolveKlineFromCrosshair(params: {
   }
 
   return klines.find((item) => item.open_time === hoveredTimestamp) ?? klines[klines.length - 1] ?? null;
+}
+
+function normalizeChartVisibleRange(
+  range: { from: Time; to: Time } | null,
+) {
+  if (!range) {
+    return null;
+  }
+
+  const from = normalizeChartTimeValue(range.from);
+  const to = normalizeChartTimeValue(range.to);
+
+  if (from === null || to === null || from >= to) {
+    return null;
+  }
+
+  return { from, to };
+}
+
+function normalizeChartTimeValue(time: Time | undefined): number | null {
+  return typeof time === 'number' && Number.isFinite(time) ? time : null;
 }

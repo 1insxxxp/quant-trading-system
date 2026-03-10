@@ -40,6 +40,7 @@ export interface MarketState {
   hasMoreHistoricalKlines: boolean;
   indicatorSettings: IndicatorSettings;
   isLoadingIndicatorSettings: boolean;
+  indicatorPreferencesUnavailable: boolean;
 
   setExchange: (exchange: string) => void;
   setSymbol: (symbol: string) => void;

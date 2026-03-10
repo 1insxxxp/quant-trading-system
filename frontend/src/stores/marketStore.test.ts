@@ -444,6 +444,35 @@ describe('marketStore', () => {
     expect(useMarketStore.getState().isLoadingIndicatorSettings).toBe(false);
   });
 
+  it('falls back to default indicator settings and stops retrying when the preferences route returns 404', async () => {
+    const fetchSpy = vi.fn(async () => ({
+      ok: false,
+      status: 404,
+      text: async () => '',
+    }) as Response);
+    vi.stubGlobal('fetch', fetchSpy);
+
+    useMarketStore.setState({
+      indicatorSettings: {
+        volume: true,
+        ma5: true,
+        ma10: true,
+        ma20: true,
+      },
+    });
+
+    await useMarketStore.getState().fetchIndicatorSettings();
+    await useMarketStore.getState().fetchIndicatorSettings();
+
+    expect(useMarketStore.getState().indicatorSettings).toEqual({
+      volume: false,
+      ma5: false,
+      ma10: false,
+      ma20: false,
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('updates indicator settings optimistically and persists to backend', async () => {
     const fetchSpy = vi.fn(async (_input: string, init?: RequestInit) => ({
       ok: true,
@@ -463,5 +492,29 @@ describe('marketStore', () => {
         method: 'PUT',
       }),
     );
+  });
+
+  it('keeps local indicator settings when the preferences route is unavailable', async () => {
+    const fetchSpy = vi.fn(async (_input: string, init?: RequestInit) => ({
+      ok: false,
+      status: 404,
+      text: async () => '',
+      json: async () => ({
+        success: false,
+        settings: JSON.parse(String(init?.body ?? '{}')).settings,
+      }),
+    }) as Response);
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await useMarketStore.getState().updateIndicatorSetting('ma10', true);
+    await useMarketStore.getState().updateIndicatorSetting('ma20', true);
+
+    expect(useMarketStore.getState().indicatorSettings).toEqual({
+      volume: false,
+      ma5: false,
+      ma10: true,
+      ma20: true,
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 });

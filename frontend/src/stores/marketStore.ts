@@ -11,6 +11,7 @@ import type {
 
 let latestFetchToken = 0;
 export const MARKET_SELECTION_STORAGE_KEY = 'quant-market-selection';
+const INDICATOR_PREFERENCES_NOT_AVAILABLE = 'HTTP 404';
 export const DEFAULT_INDICATOR_SETTINGS: IndicatorSettings = {
   volume: false,
   ma5: false,
@@ -80,6 +81,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
   hasMoreHistoricalKlines: true,
   indicatorSettings: { ...DEFAULT_INDICATOR_SETTINGS },
   isLoadingIndicatorSettings: false,
+  indicatorPreferencesUnavailable: false,
 
   setExchange: (exchange: string) => {
     set((state) => {
@@ -322,15 +324,39 @@ export const useMarketStore = create<MarketState>((set, get) => ({
   },
 
   fetchIndicatorSettings: async () => {
+    const { isLoadingIndicatorSettings, indicatorPreferencesUnavailable } = get();
+
+    if (indicatorPreferencesUnavailable) {
+      set({
+        indicatorSettings: { ...DEFAULT_INDICATOR_SETTINGS },
+        isLoadingIndicatorSettings: false,
+      });
+      return;
+    }
+
+    if (isLoadingIndicatorSettings) {
+      return;
+    }
+
     set({ isLoadingIndicatorSettings: true });
 
     try {
       const response = await fetch('/quant/api/preferences/chart-indicators');
       const data = await readJsonResponse<BackendIndicatorSettingsResponse>(response);
 
+      if (!data.success && data.error === INDICATOR_PREFERENCES_NOT_AVAILABLE) {
+        set({
+          indicatorSettings: { ...DEFAULT_INDICATOR_SETTINGS },
+          isLoadingIndicatorSettings: false,
+          indicatorPreferencesUnavailable: true,
+        });
+        return;
+      }
+
       set({
         indicatorSettings: normalizeIndicatorSettings(data.settings),
         isLoadingIndicatorSettings: false,
+        indicatorPreferencesUnavailable: false,
       });
     } catch (error) {
       console.error('Failed to load chart indicator settings:', error);
@@ -343,12 +369,17 @@ export const useMarketStore = create<MarketState>((set, get) => ({
 
   updateIndicatorSetting: async (indicatorId, enabled) => {
     const previousSettings = get().indicatorSettings;
+    const { indicatorPreferencesUnavailable } = get();
     const nextSettings = {
       ...previousSettings,
       [indicatorId]: enabled,
     };
 
     set({ indicatorSettings: nextSettings });
+
+    if (indicatorPreferencesUnavailable) {
+      return;
+    }
 
     try {
       const response = await fetch('/quant/api/preferences/chart-indicators', {
@@ -360,8 +391,17 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       });
       const data = await readJsonResponse<BackendIndicatorSettingsResponse>(response);
 
+      if (!data.success && data.error === INDICATOR_PREFERENCES_NOT_AVAILABLE) {
+        set({
+          indicatorSettings: nextSettings,
+          indicatorPreferencesUnavailable: true,
+        });
+        return;
+      }
+
       set({
         indicatorSettings: normalizeIndicatorSettings(data.settings ?? nextSettings),
+        indicatorPreferencesUnavailable: false,
       });
     } catch (error) {
       console.error('Failed to save chart indicator settings:', error);
