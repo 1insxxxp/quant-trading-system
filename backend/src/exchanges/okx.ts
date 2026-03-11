@@ -289,7 +289,7 @@ export class OKXAdapter implements ExchangeAdapter {
         return true;
       };
 
-      ws.once('open', (event) => {
+      ws.once('open', () => {
         opened = true;
       });
 
@@ -306,7 +306,7 @@ export class OKXAdapter implements ExchangeAdapter {
         console.error(`OKX ${label} WebSocket error via ${attempt.kind}:`, error);
       });
 
-      ws.on('close', (event) => {
+      ws.on('close', () => {
         if (activeSocket === ws) {
           this.wsConnections.delete(key);
         }
