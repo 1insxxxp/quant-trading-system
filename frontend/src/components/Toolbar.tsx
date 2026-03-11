@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { IndicatorId, IndicatorSettings } from '../types';
 import { useMarketStore } from '../stores/marketStore';
 import { IndicatorSettingsButton } from './IndicatorSettingsButton';
+import { ChartSettingsDialog } from './ChartSettingsDialog';
 
 interface IntervalOption {
   value: string;
@@ -46,6 +47,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   const interval = useMarketStore((state) => state.interval);
   const setInterval = useMarketStore((state) => state.setInterval);
   const [isIntervalPanelOpen, setIsIntervalPanelOpen] = useState(false);
+  const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
   const intervalPanelRootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -118,38 +120,40 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     <div className="toolbar-inline toolbar-inline--terminal">
       <div className="toolbar-inline__rail toolbar-terminal__rail">
         <div className="toolbar-terminal__actions" ref={intervalPanelRootRef}>
-          <div className="toolbar-interval-strip">
-            <span className="toolbar-label toolbar-interval-strip__label">周期</span>
-            <div className="toolbar-interval-strip__buttons" role="tablist" aria-label="K线周期">
-              {INTERVALS.map((intervalOption) => (
-                <button
-                  key={intervalOption.value}
-                  type="button"
-                  role="tab"
-                  aria-selected={interval === intervalOption.value}
-                  className={`toolbar-interval-strip__button ${
-                    interval === intervalOption.value ? 'toolbar-interval-strip__button--active' : ''
-                  }`}
-                  onClick={() => setInterval(intervalOption.value)}
-                >
-                  {intervalOption.label}
-                </button>
-              ))}
+          <div className="toolbar-terminal__interval-slot">
+            <div className="toolbar-interval-strip">
+              <span className="toolbar-label toolbar-interval-strip__label">周期</span>
+              <div className="toolbar-interval-strip__buttons" role="tablist" aria-label="K线周期">
+                {INTERVALS.map((intervalOption) => (
+                  <button
+                    key={intervalOption.value}
+                    type="button"
+                    role="tab"
+                    aria-selected={interval === intervalOption.value}
+                    className={`toolbar-interval-strip__button ${
+                      interval === intervalOption.value ? 'toolbar-interval-strip__button--active' : ''
+                    }`}
+                    onClick={() => setInterval(intervalOption.value)}
+                  >
+                    {intervalOption.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className={`toolbar-interval-strip__more ${isIntervalPanelOpen ? 'toolbar-interval-strip__more--open' : ''}`}
+                aria-haspopup="dialog"
+                aria-expanded={isIntervalPanelOpen}
+                title="更多周期"
+                onClick={() => setIsIntervalPanelOpen((value) => !value)}
+              >
+                <span aria-hidden="true" className="toolbar-interval-strip__more-icon">
+                  <svg viewBox="0 0 16 16">
+                    <path d="M4.2 6.4L8 10.2l3.8-3.8" />
+                  </svg>
+                </span>
+              </button>
             </div>
-            <button
-              type="button"
-              className={`toolbar-interval-strip__more ${isIntervalPanelOpen ? 'toolbar-interval-strip__more--open' : ''}`}
-              aria-haspopup="dialog"
-              aria-expanded={isIntervalPanelOpen}
-              title="更多周期"
-              onClick={() => setIsIntervalPanelOpen((value) => !value)}
-            >
-              <span aria-hidden="true" className="toolbar-interval-strip__more-icon">
-                <svg viewBox="0 0 16 16">
-                  <path d="M4.2 6.4L8 10.2l3.8-3.8" />
-                </svg>
-              </span>
-            </button>
           </div>
 
           {isIntervalPanelOpen ? (
@@ -185,14 +189,34 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             </div>
           ) : null}
 
-          <IndicatorSettingsButton
-            iconOnly
-            triggerClassName="toolbar-indicator-trigger"
-            settings={indicatorSettings}
-            onToggle={onToggleIndicator}
-          />
+          <div className="toolbar-terminal__control-cluster">
+            <IndicatorSettingsButton
+              iconOnly
+              triggerClassName="toolbar-indicator-trigger"
+              settings={indicatorSettings}
+              onToggle={onToggleIndicator}
+            />
+
+            <button
+              type="button"
+              className="toolbar-settings-button"
+              onClick={() => setIsSettingsDialogOpen(true)}
+              title="图表设置"
+              aria-label="图表设置"
+            >
+              <svg viewBox="0 0 16 16" width="16" height="16">
+                <path d="M8 10a2 2 0 100-4 2 2 0 000 4z" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                <path d="M13.5 8a5.5 5.5 0 11-11 0 5.5 5.5 0 0111 0z" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
+
+      <ChartSettingsDialog
+        isOpen={isSettingsDialogOpen}
+        onClose={() => setIsSettingsDialogOpen(false)}
+      />
     </div>
   );
 };

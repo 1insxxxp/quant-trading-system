@@ -57,10 +57,11 @@ export class KlineService {
     }
 
     if (cached.length >= requestLimit) {
+      const persistedHasMore = syncState?.has_more_history ?? true;
       return {
         klines: cached.slice(-limit),
         source: 'cache',
-        hasMore: true,
+        hasMore: persistedHasMore,
       };
     }
 
@@ -82,7 +83,7 @@ export class KlineService {
         before,
       );
       const mergedKlines = normalizeKlines([...cached, ...remoteKlines]);
-      const hasMore = mergedKlines.length > limit;
+      const hasMore = remoteKlines.length >= requestLimit;
       const responseKlines = mergedKlines.slice(-limit);
 
       if (remoteKlines.length > 0) {
@@ -247,25 +248,11 @@ export class KlineService {
     limit: number,
     before?: number,
   ): Promise<Kline[]> {
-    const collected = new Map<number, Kline>();
-    let cursor = before;
+    const page = normalizeKlines(
+      await adapter.getKlines(symbol, interval, limit, before),
+    );
 
-    while (collected.size < limit) {
-      const page = normalizeKlines(
-        await adapter.getKlines(symbol, interval, limit - collected.size, cursor),
-      );
-
-      if (page.length === 0) break;
-
-      page.forEach((k) => collected.set(k.open_time, k));
-
-      const earliest = page[0];
-      if (!earliest || (page.length === 1 && cursor === earliest.open_time)) break;
-
-      cursor = earliest.open_time;
-    }
-
-    return normalizeKlines([...collected.values()]).slice(-limit);
+    return page;
   }
 }
 
