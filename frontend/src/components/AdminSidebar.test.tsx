@@ -6,7 +6,8 @@ describe('AdminSidebar', () => {
   it('renders a text-only navigation rail without the oversized brand card', () => {
     const markup = renderToStaticMarkup(<AdminSidebar />);
 
-    expect(markup).toContain('量化后台');
+    expect(markup).toContain('量化平台');
+    expect(markup).not.toContain('量化后台');
     expect(markup).toContain('导航菜单');
     expect(markup).toContain('行情中心');
     expect(markup).toContain('交易执行');

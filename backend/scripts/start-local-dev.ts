@@ -4,11 +4,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { Client, type ConnectConfig } from 'ssh2';
+import { Client as PgClient } from 'pg';
 import '../src/config/load-env.ts';
 import {
   buildLocalDevConfig,
   parseLocalDevArgs,
 } from '../src/dev/local-dev-config.ts';
+import {
+  getTunnelHealthErrorMessage,
+  resolveTunnelDecision,
+} from '../src/dev/local-dev-tunnel.ts';
 
 const backendDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -70,12 +75,23 @@ function waitForPortOpen(host: string, port: number, timeoutMs: number): Promise
 
 async function ensureTunnel(): Promise<TunnelHandle | null> {
   const alreadyOpen = await waitForPortOpen('127.0.0.1', config.tunnel.localPort, 1000);
+  const databaseReachable = alreadyOpen
+    ? await waitForDatabaseReady('127.0.0.1', config.tunnel.localPort, 1500)
+    : false;
+  const decision = resolveTunnelDecision({
+    portOpen: alreadyOpen,
+    databaseReachable,
+  });
 
-  if (alreadyOpen) {
+  if (decision === 'reuse') {
     console.log(
       `[local-dev] Reusing existing DB tunnel on 127.0.0.1:${config.tunnel.localPort}`,
     );
     return null;
+  }
+
+  if (decision === 'restart_required') {
+    throw new Error(getTunnelHealthErrorMessage(config.tunnel.localPort));
   }
 
   const conn = new Client();
@@ -112,12 +128,51 @@ async function ensureTunnel(): Promise<TunnelHandle | null> {
       .connect(buildSshConfig());
   });
 
+  const databaseReady = await waitForDatabaseReady(
+    '127.0.0.1',
+    config.tunnel.localPort,
+    3000,
+  );
+
+  if (!databaseReady) {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    conn.end();
+    throw new Error(
+      `DB tunnel opened on 127.0.0.1:${config.tunnel.localPort}, but PostgreSQL did not become ready.`,
+    );
+  }
+
   return {
     close: async () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       conn.end();
     },
   };
+}
+
+async function waitForDatabaseReady(
+  host: string,
+  port: number,
+  timeoutMs: number,
+): Promise<boolean> {
+  const client = new PgClient({
+    host,
+    port,
+    database: process.env.DB_NAME,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    connectionTimeoutMillis: timeoutMs,
+  });
+
+  try {
+    await client.connect();
+    await client.query('SELECT 1');
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await client.end().catch(() => undefined);
+  }
 }
 
 function buildSshConfig(): ConnectConfig {

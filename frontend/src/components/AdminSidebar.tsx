@@ -17,8 +17,7 @@ const NAV_ITEMS: NavItem[] = [
 export const AdminSidebar: React.FC = () => (
   <aside className="admin-sidebar">
     <div className="admin-sidebar__header">
-      <span className="admin-sidebar__eyebrow">量化平台</span>
-      <strong className="admin-sidebar__title">量化后台</strong>
+      <strong className="admin-sidebar__title">量化平台</strong>
     </div>
 
     <div className="admin-sidebar__section">
