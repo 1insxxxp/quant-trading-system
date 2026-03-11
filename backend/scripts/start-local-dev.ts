@@ -126,10 +126,18 @@ async function ensureTunnel(): Promise<TunnelHandle | null> {
         }
 
         socket.pipe(stream).pipe(socket);
-        socket.on('error', () => stream.end());
-        stream.on('error', () => socket.destroy());
+        socket.on('error', (err) => {
+          stream.end();
+        });
+        stream.on('error', (err) => {
+          socket.destroy();
+        });
       },
     );
+  });
+
+  server.on('error', (err) => {
+    console.error('[local-dev] DB tunnel server error:', err.message);
   });
 
   let serverListening = false;

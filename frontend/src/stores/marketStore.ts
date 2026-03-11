@@ -29,7 +29,7 @@ const DEFAULT_MARKET_SELECTION = {
   symbol: 'BTCUSDT',
   interval: '1h',
 } as const;
-const INITIAL_KLINE_LIMIT = 2000;
+const INITIAL_KLINE_LIMIT = 500;
 const OLDER_KLINE_PAGE_SIZE = 1000;
 const INITIAL_TOP_UP_MAX_ROUNDS = 4;
 const DEFAULT_OLDER_KLINE_LOAD_ERROR = '加载历史K线失败，请重试。';

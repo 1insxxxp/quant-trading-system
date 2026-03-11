@@ -249,34 +249,20 @@ export class KlineService {
   ): Promise<Kline[]> {
     const collected = new Map<number, Kline>();
     let cursor = before;
-    let remaining = limit;
 
-    while (remaining > 0) {
+    while (collected.size < limit) {
       const page = normalizeKlines(
-        await adapter.getKlines(symbol, interval, remaining, cursor),
+        await adapter.getKlines(symbol, interval, limit - collected.size, cursor),
       );
 
-      if (page.length === 0) {
-        break;
-      }
+      if (page.length === 0) break;
 
-      page.forEach((kline) => {
-        collected.set(kline.open_time, kline);
-      });
-
-      remaining = limit - collected.size;
+      page.forEach((k) => collected.set(k.open_time, k));
 
       const earliest = page[0];
-
-      if (!earliest || page.length === 1 && cursor === earliest.open_time) {
-        break;
-      }
+      if (!earliest || (page.length === 1 && cursor === earliest.open_time)) break;
 
       cursor = earliest.open_time;
-
-      if (page.length === 1) {
-        break;
-      }
     }
 
     return normalizeKlines([...collected.values()]).slice(-limit);

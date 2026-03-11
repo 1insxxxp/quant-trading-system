@@ -57,7 +57,7 @@ export class OKXAdapter implements ExchangeAdapter {
           params: {
             instId: instId.replace('USDT', '-USDT'),
             bar: this.intervalMap[interval] || '1H',
-            limit: Math.min(limit, 100),
+            limit: Math.min(limit, 300),
             ...(typeof before === 'number' ? { after: String(before) } : {}),
           },
           httpAgent: attempt.agent,
