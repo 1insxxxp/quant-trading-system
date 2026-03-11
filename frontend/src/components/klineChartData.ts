@@ -128,15 +128,17 @@ export function shouldLoadOlderKlines(params: {
   isLoadingOlderKlines: boolean;
   hasMoreHistoricalKlines: boolean;
   isHistoryPagingReady: boolean;
+  hasOlderLoadError: boolean;
 }): boolean {
   const {
     visibleFrom,
     isLoadingOlderKlines,
     hasMoreHistoricalKlines,
     isHistoryPagingReady,
+    hasOlderLoadError,
   } = params;
 
-  if (isLoadingOlderKlines || !hasMoreHistoricalKlines || !isHistoryPagingReady) {
+  if (isLoadingOlderKlines || !hasMoreHistoricalKlines || !isHistoryPagingReady || hasOlderLoadError) {
     return false;
   }
 

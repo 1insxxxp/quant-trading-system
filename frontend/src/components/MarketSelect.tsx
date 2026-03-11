@@ -193,7 +193,9 @@ export const MarketSelect: React.FC<MarketSelectProps> = ({
           <span className="market-select__text">{selectedOption?.label ?? '--'}</span>
         </span>
         <span className={`market-select__chevron${isOpen ? ' market-select__chevron--open' : ''}`} aria-hidden="true">
-          ▾
+          <svg viewBox="0 0 16 16" className="market-select__chevron-svg">
+            <path d="M4.2 6.4L8 10.2l3.8-3.8" />
+          </svg>
         </span>
       </button>
 

@@ -88,14 +88,26 @@ export class WebSocketService {
     }
 
     this.subscriptions.get(subscriptionKey)!.add(ws);
-    await this.ensureMarketStream(exchange, symbol, interval);
 
-    this.sendMessage(ws, {
-      type: 'subscribed',
-      exchange,
-      symbol,
-      interval,
-    });
+    try {
+      await this.ensureMarketStream(exchange, symbol, interval);
+
+      this.sendMessage(ws, {
+        type: 'subscribed',
+        exchange,
+        symbol,
+        interval,
+      });
+    } catch (error: any) {
+      const clients = this.subscriptions.get(subscriptionKey);
+
+      clients?.delete(ws);
+      if (clients && clients.size === 0) {
+        this.subscriptions.delete(subscriptionKey);
+      }
+
+      this.sendError(ws, `Failed to subscribe ${subscriptionKey}: ${error?.message ?? String(error)}`);
+    }
   }
 
   private handleUnsubscribe(ws: WebSocket, message: WsMessage) {

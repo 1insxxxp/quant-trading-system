@@ -31,6 +31,8 @@ const DEFAULT_MARKET_SELECTION = {
 } as const;
 const INITIAL_KLINE_LIMIT = 2000;
 const OLDER_KLINE_PAGE_SIZE = 1000;
+const INITIAL_TOP_UP_MAX_ROUNDS = 4;
+const DEFAULT_OLDER_KLINE_LOAD_ERROR = '加载历史K线失败，请重试。';
 
 interface BackendSymbol {
   exchange?: string;
@@ -79,6 +81,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
   isLoadingSymbols: false,
   isLoadingKlines: false,
   isLoadingOlderKlines: false,
+  olderKlineLoadError: null,
   hasMoreHistoricalKlines: true,
   indicatorSettings: { ...DEFAULT_INDICATOR_SETTINGS },
   isLoadingIndicatorSettings: false,
@@ -98,6 +101,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         lastPriceTimestamp: null,
         isLoadingKlines: true,
         isLoadingOlderKlines: false,
+        olderKlineLoadError: null,
         hasMoreHistoricalKlines: true,
       };
     });
@@ -118,6 +122,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         lastPriceTimestamp: null,
         isLoadingKlines: true,
         isLoadingOlderKlines: false,
+        olderKlineLoadError: null,
         hasMoreHistoricalKlines: true,
       };
     });
@@ -138,6 +143,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         lastPriceTimestamp: null,
         isLoadingKlines: true,
         isLoadingOlderKlines: false,
+        olderKlineLoadError: null,
         hasMoreHistoricalKlines: true,
       };
     });
@@ -149,6 +155,27 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     set({
       klines: normalizedKlines,
       klineSource: normalizedKlines.length > 0 ? get().klineSource : 'empty',
+    });
+  },
+
+  mergeKlines: (incomingKlines: Kline[]) => {
+    set((state) => {
+      const relevantKlines = incomingKlines.filter((kline) => (
+        kline.exchange === state.exchange &&
+        kline.symbol === state.symbol &&
+        kline.interval === state.interval
+      ));
+
+      if (relevantKlines.length === 0) {
+        return state;
+      }
+
+      const nextKlines = normalizeKlines([...state.klines, ...relevantKlines]);
+
+      return {
+        klines: nextKlines,
+        latestPrice: nextKlines[nextKlines.length - 1]?.close ?? state.latestPrice,
+      };
     });
   },
 
@@ -169,12 +196,17 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       const nextKlines = [...klines];
       nextKlines[index] = kline;
       nextKlines.sort((a, b) => a.open_time - b.open_time);
-      set({ klines: nextKlines });
+      set({
+        klines: nextKlines,
+        latestPrice: nextKlines[nextKlines.length - 1]?.close ?? null,
+      });
       return;
     }
 
+    const nextKlines = [...klines, kline].sort((a, b) => a.open_time - b.open_time);
     set({
-      klines: [...klines, kline].sort((a, b) => a.open_time - b.open_time),
+      klines: nextKlines,
+      latestPrice: nextKlines[nextKlines.length - 1]?.close ?? null,
     });
   },
 
@@ -204,55 +236,97 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     const marketKey = getMarketKey(exchange, symbol, interval);
     const fetchToken = ++latestFetchToken;
 
-    set({ isLoadingKlines: true });
+    set({
+      isLoadingKlines: true,
+      isLoadingOlderKlines: false,
+      olderKlineLoadError: null,
+    });
 
     try {
-      const response = await fetch(
-        `/quant/api/klines?exchange=${exchange}&symbol=${symbol}&interval=${interval}&limit=${INITIAL_KLINE_LIMIT}`,
-      );
-      const data = await readJsonResponse<BackendKlineResponse>(response);
+      const initialResult = await fetchKlinePage({
+        exchange,
+        symbol,
+        interval,
+        limit: INITIAL_KLINE_LIMIT,
+      });
 
-      if (fetchToken !== latestFetchToken) {
+      if (isStaleInitialRequest(fetchToken, marketKey, get)) {
         return;
       }
 
-      const currentState = get();
-      const currentMarketKey = getMarketKey(
-        currentState.exchange,
-        currentState.symbol,
-        currentState.interval,
-      );
-
-      if (currentMarketKey !== marketKey) {
-        return;
-      }
-
-      if (data.success) {
-        const nextKlines = normalizeKlines(data.klines ?? []);
+      if (!initialResult.success) {
+        console.error('Failed to load klines:', initialResult.error);
         set({
-          klines: nextKlines,
-          klineSource: resolveKlineSource(data.source, nextKlines),
-          latestPrice: nextKlines[nextKlines.length - 1]?.close ?? null,
+          klines: [],
+          klineSource: 'empty',
+          latestPrice: null,
           lastPriceTimestamp: null,
           isLoadingKlines: false,
           isLoadingOlderKlines: false,
-          hasMoreHistoricalKlines: data.hasMore ?? false,
+          olderKlineLoadError: null,
+          hasMoreHistoricalKlines: false,
         });
         return;
       }
 
-      console.error('Failed to load klines:', data.error);
+      let mergedKlines = normalizeKlines(initialResult.klines ?? []);
+      let hasMoreHistory = initialResult.hasMore ?? false;
+      let source = resolveKlineSource(initialResult.source, mergedKlines);
+      let beforeCursor = mergedKlines[0]?.open_time;
+
+      for (
+        let round = 0;
+        round < INITIAL_TOP_UP_MAX_ROUNDS &&
+        mergedKlines.length < INITIAL_KLINE_LIMIT &&
+        hasMoreHistory &&
+        typeof beforeCursor === 'number';
+        round += 1
+      ) {
+        const page = await fetchKlinePage({
+          exchange,
+          symbol,
+          interval,
+          limit: Math.min(OLDER_KLINE_PAGE_SIZE, INITIAL_KLINE_LIMIT - mergedKlines.length),
+          before: beforeCursor,
+        });
+
+        if (isStaleInitialRequest(fetchToken, marketKey, get)) {
+          return;
+        }
+
+        if (!page.success) {
+          break;
+        }
+
+        const older = normalizeKlines(page.klines ?? []);
+
+        if (older.length === 0) {
+          hasMoreHistory = false;
+          break;
+        }
+
+        mergedKlines = normalizeKlines([...older, ...mergedKlines]);
+        hasMoreHistory = page.hasMore ?? false;
+        beforeCursor = mergedKlines[0]?.open_time;
+
+        if (source !== 'remote') {
+          source = resolveKlineSource(page.source, mergedKlines);
+        }
+      }
+
+      const nextKlines = mergedKlines.slice(-INITIAL_KLINE_LIMIT);
       set({
-        klines: [],
-        klineSource: 'empty',
-        latestPrice: null,
+        klines: nextKlines,
+        klineSource: source,
+        latestPrice: nextKlines[nextKlines.length - 1]?.close ?? null,
         lastPriceTimestamp: null,
         isLoadingKlines: false,
         isLoadingOlderKlines: false,
-        hasMoreHistoricalKlines: false,
+        olderKlineLoadError: null,
+        hasMoreHistoricalKlines: hasMoreHistory || mergedKlines.length > INITIAL_KLINE_LIMIT,
       });
     } catch (error) {
-      if (fetchToken !== latestFetchToken) {
+      if (isStaleInitialRequest(fetchToken, marketKey, get)) {
         return;
       }
 
@@ -264,6 +338,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         lastPriceTimestamp: null,
         isLoadingKlines: false,
         isLoadingOlderKlines: false,
+        olderKlineLoadError: null,
         hasMoreHistoricalKlines: false,
       });
     }
@@ -291,20 +366,26 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       return;
     }
 
-    set({ isLoadingOlderKlines: true });
+    set({ isLoadingOlderKlines: true, olderKlineLoadError: null });
 
     try {
-      const response = await fetch(
-        `/quant/api/klines?exchange=${exchange}&symbol=${symbol}&interval=${interval}&limit=${OLDER_KLINE_PAGE_SIZE}&before=${earliestOpenTime}`,
-      );
-      const data = await readJsonResponse<BackendKlineResponse>(response);
+      const data = await fetchKlinePage({
+        exchange,
+        symbol,
+        interval,
+        limit: OLDER_KLINE_PAGE_SIZE,
+        before: earliestOpenTime,
+      });
 
       if (getMarketKey(get().exchange, get().symbol, get().interval) !== marketKey) {
         return;
       }
 
       if (!data.success) {
-        set({ isLoadingOlderKlines: false, hasMoreHistoricalKlines: false });
+        set({
+          isLoadingOlderKlines: false,
+          olderKlineLoadError: data.error ?? DEFAULT_OLDER_KLINE_LOAD_ERROR,
+        });
         return;
       }
 
@@ -315,12 +396,20 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         klines: nextKlines,
         klineSource: resolveKlineSource(data.source, nextKlines),
         isLoadingOlderKlines: false,
+        olderKlineLoadError: null,
         hasMoreHistoricalKlines: data.hasMore ?? false,
       });
     } catch (error) {
       console.error('Failed to load older klines:', error);
-      set({ isLoadingOlderKlines: false, hasMoreHistoricalKlines: false });
+      set({
+        isLoadingOlderKlines: false,
+        olderKlineLoadError: DEFAULT_OLDER_KLINE_LOAD_ERROR,
+      });
     }
+  },
+
+  retryLoadOlderKlines: async () => {
+    await get().loadOlderKlines();
   },
 
   fetchSymbols: async () => {
@@ -367,11 +456,12 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       const response = await fetch('/quant/api/preferences/chart-indicators');
       const data = await readJsonResponse<BackendIndicatorSettingsResponse>(response);
 
-      if (!data.success && data.error === INDICATOR_PREFERENCES_NOT_AVAILABLE) {
+      if (!data.success) {
+        const shouldDisableRoute = isIndicatorPreferencesUnavailableError(data.error);
         set({
           indicatorSettings: { ...DEFAULT_INDICATOR_SETTINGS },
           isLoadingIndicatorSettings: false,
-          indicatorPreferencesUnavailable: true,
+          indicatorPreferencesUnavailable: shouldDisableRoute,
         });
         return;
       }
@@ -386,15 +476,15 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       set({
         indicatorSettings: { ...DEFAULT_INDICATOR_SETTINGS },
         isLoadingIndicatorSettings: false,
+        indicatorPreferencesUnavailable: true,
       });
     }
   },
 
   updateIndicatorSetting: async (indicatorId, enabled) => {
-    const previousSettings = get().indicatorSettings;
     const { indicatorPreferencesUnavailable } = get();
     const nextSettings = {
-      ...previousSettings,
+      ...get().indicatorSettings,
       [indicatorId]: enabled,
     };
 
@@ -414,10 +504,11 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       });
       const data = await readJsonResponse<BackendIndicatorSettingsResponse>(response);
 
-      if (!data.success && data.error === INDICATOR_PREFERENCES_NOT_AVAILABLE) {
+      if (!data.success) {
+        const shouldDisableRoute = isIndicatorPreferencesUnavailableError(data.error);
         set({
           indicatorSettings: nextSettings,
-          indicatorPreferencesUnavailable: true,
+          indicatorPreferencesUnavailable: shouldDisableRoute,
         });
         return;
       }
@@ -428,7 +519,10 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       });
     } catch (error) {
       console.error('Failed to save chart indicator settings:', error);
-      set({ indicatorSettings: previousSettings });
+      set({
+        indicatorSettings: nextSettings,
+        indicatorPreferencesUnavailable: true,
+      });
     }
   },
 }));
@@ -528,6 +622,7 @@ function applySymbolOptions(
     symbols: resolvedSymbols,
     symbol: resolvedSymbol,
     isLoadingSymbols: false,
+    olderKlineLoadError: null,
     ...(resolvedSymbol !== currentSymbol
       ? { latestPrice: null, lastPriceTimestamp: null, isLoadingKlines: true }
       : {}),
@@ -547,6 +642,41 @@ function resolveKlineSource(
   return klines.length > 0 ? 'remote' : 'empty';
 }
 
+async function fetchKlinePage(params: {
+  exchange: string;
+  symbol: string;
+  interval: string;
+  limit: number;
+  before?: number;
+}): Promise<BackendKlineResponse> {
+  const { exchange, symbol, interval, limit, before } = params;
+  const beforeQuery = typeof before === 'number' ? `&before=${before}` : '';
+  const response = await fetch(
+    `/quant/api/klines?exchange=${exchange}&symbol=${symbol}&interval=${interval}&limit=${limit}${beforeQuery}`,
+  );
+
+  return readJsonResponse<BackendKlineResponse>(response);
+}
+
+function isStaleInitialRequest(
+  fetchToken: number,
+  marketKey: string,
+  get: () => MarketState,
+): boolean {
+  if (fetchToken !== latestFetchToken) {
+    return true;
+  }
+
+  const currentState = get();
+  const currentMarketKey = getMarketKey(
+    currentState.exchange,
+    currentState.symbol,
+    currentState.interval,
+  );
+
+  return currentMarketKey !== marketKey;
+}
+
 function normalizeIndicatorSettings(
   settings: Partial<Record<IndicatorId, boolean>> | undefined,
 ): IndicatorSettings {
@@ -556,6 +686,25 @@ function normalizeIndicatorSettings(
     ma10: settings?.ma10 === true,
     ma20: settings?.ma20 === true,
   };
+}
+
+function isIndicatorPreferencesUnavailableError(error: string | undefined): boolean {
+  if (!error) {
+    return false;
+  }
+
+  if (error === INDICATOR_PREFERENCES_NOT_AVAILABLE) {
+    return true;
+  }
+
+  const match = /^HTTP\s+(\d{3})$/.exec(error);
+
+  if (!match) {
+    return false;
+  }
+
+  const status = Number.parseInt(match[1], 10);
+  return status >= 500;
 }
 
 async function readJsonResponse<T extends { success?: boolean; error?: string }>(
@@ -577,17 +726,21 @@ async function readJsonResponse<T extends { success?: boolean; error?: string }>
 }
 
 async function parseResponseBody<T>(response: Response): Promise<T> {
-  const textFn = (response as Response & { text?: () => Promise<string> }).text;
+  try {
+    const textFn = (response as Response & { text?: () => Promise<string> }).text;
 
-  if (typeof textFn === 'function') {
-    const raw = await textFn.call(response);
-    return raw ? JSON.parse(raw) as T : {} as T;
-  }
+    if (typeof textFn === 'function') {
+      const raw = await textFn.call(response);
+      return raw ? JSON.parse(raw) as T : {} as T;
+    }
 
-  const jsonFn = (response as Response & { json?: () => Promise<T> }).json;
+    const jsonFn = (response as Response & { json?: () => Promise<T> }).json;
 
-  if (typeof jsonFn === 'function') {
-    return jsonFn.call(response);
+    if (typeof jsonFn === 'function') {
+      return jsonFn.call(response);
+    }
+  } catch {
+    return {} as T;
   }
 
   return {} as T;

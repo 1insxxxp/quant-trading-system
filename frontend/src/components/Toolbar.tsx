@@ -1,105 +1,198 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import type { IndicatorId, IndicatorSettings } from '../types';
 import { useMarketStore } from '../stores/marketStore';
-import { ExchangeIcon, AssetIcon } from './marketIcons';
-import { MarketSelect, type MarketSelectOption } from './MarketSelect';
+import { IndicatorSettingsButton } from './IndicatorSettingsButton';
 
-const EXCHANGES = [
-  { value: 'binance', label: 'Binance' },
-  { value: 'okx', label: 'OKX' },
+interface IntervalOption {
+  value: string;
+  label: string;
+  enabled: boolean;
+}
+
+const INTERVALS: IntervalOption[] = [
+  { value: '1m', label: '1分', enabled: true },
+  { value: '5m', label: '5分', enabled: true },
+  { value: '15m', label: '15分', enabled: true },
+  { value: '1h', label: '1小时', enabled: true },
+  { value: '4h', label: '4小时', enabled: true },
+  { value: '1d', label: '1日', enabled: true },
 ];
 
-const INTERVALS = [
-  { value: '1m', label: '1m' },
-  { value: '5m', label: '5m' },
-  { value: '15m', label: '15m' },
-  { value: '1h', label: '1h' },
-  { value: '4h', label: '4h' },
-  { value: '1d', label: '1d' },
+const EXTENDED_INTERVALS: IntervalOption[] = [
+  { value: '1s', label: '1秒', enabled: false },
+  ...INTERVALS,
+  { value: '30m', label: '30分', enabled: false },
+  { value: '2h', label: '2小时', enabled: false },
+  { value: '6h', label: '6小时', enabled: false },
+  { value: '12h', label: '12小时', enabled: false },
+  { value: '2d', label: '2日', enabled: false },
+  { value: '3d', label: '3日', enabled: false },
+  { value: '5d', label: '5日', enabled: false },
+  { value: '1w', label: '1周', enabled: false },
+  { value: '1M', label: '1月', enabled: false },
 ];
 
-export const Toolbar: React.FC = () => {
-  const {
-    exchange,
-    symbol,
-    interval,
-    symbols,
-    isLoadingSymbols,
-    setExchange,
-    setSymbol,
-    setInterval,
-    fetchSymbols,
-  } = useMarketStore();
+interface ToolbarProps {
+  indicatorSettings: IndicatorSettings;
+  onToggleIndicator: (indicatorId: IndicatorId, enabled: boolean) => void;
+}
+
+const HOTKEY_INTERVALS = INTERVALS.map((item) => item.value);
+
+export const Toolbar: React.FC<ToolbarProps> = ({
+  indicatorSettings,
+  onToggleIndicator,
+}) => {
+  const interval = useMarketStore((state) => state.interval);
+  const setInterval = useMarketStore((state) => state.setInterval);
+  const [isIntervalPanelOpen, setIsIntervalPanelOpen] = useState(false);
+  const intervalPanelRootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    void fetchSymbols();
-  }, [fetchSymbols]);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
+        return;
+      }
 
-  const symbolOptions = symbols.length > 0
-    ? symbols
-    : [{ value: '', label: isLoadingSymbols ? '加载中...' : '暂无交易对' }];
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName?.toLowerCase();
+      const isEditable = Boolean(
+        target?.isContentEditable ||
+        tagName === 'input' ||
+        tagName === 'textarea' ||
+        tagName === 'select',
+      );
 
-  const exchangeOptions: MarketSelectOption[] = EXCHANGES.map((exchangeOption) => ({
-    value: exchangeOption.value,
-    label: exchangeOption.label,
-    icon: <ExchangeIcon exchange={exchangeOption.value} />,
-  }));
+      if (isEditable) {
+        return;
+      }
 
-  const marketSymbolOptions: MarketSelectOption[] = symbolOptions.map((symbolOption) => ({
-    value: symbolOption.value,
-    label: symbolOption.label,
-    icon: <AssetIcon asset={symbolOption.baseAsset ?? resolveBaseAsset(symbolOption)} />,
-    disabled: symbolOption.value === '',
-  }));
+      const hotkeyIndex = Number.parseInt(event.key, 10) - 1;
+      if (Number.isNaN(hotkeyIndex) || hotkeyIndex < 0 || hotkeyIndex >= HOTKEY_INTERVALS.length) {
+        return;
+      }
+
+      const nextInterval = HOTKEY_INTERVALS[hotkeyIndex];
+      if (!nextInterval || nextInterval === interval) {
+        return;
+      }
+
+      event.preventDefault();
+      setInterval(nextInterval);
+      setIsIntervalPanelOpen(false);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [interval, setInterval]);
+
+  useEffect(() => {
+    if (!isIntervalPanelOpen) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!intervalPanelRootRef.current?.contains(event.target as Node)) {
+        setIsIntervalPanelOpen(false);
+      }
+    };
+
+    const handleEscapeDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsIntervalPanelOpen(false);
+      }
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleEscapeDown);
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleEscapeDown);
+    };
+  }, [isIntervalPanelOpen]);
 
   return (
     <div className="toolbar-inline toolbar-inline--terminal">
-      <div className="toolbar-field toolbar-field--terminal">
-        <MarketSelect
-          label="交易所"
-          value={exchange}
-          options={exchangeOptions}
-          onChange={setExchange}
-          testId="exchange-select"
-        />
-      </div>
+      <div className="toolbar-inline__rail toolbar-terminal__rail">
+        <div className="toolbar-terminal__actions" ref={intervalPanelRootRef}>
+          <div className="toolbar-interval-strip">
+            <span className="toolbar-label toolbar-interval-strip__label">周期</span>
+            <div className="toolbar-interval-strip__buttons" role="tablist" aria-label="K线周期">
+              {INTERVALS.map((intervalOption) => (
+                <button
+                  key={intervalOption.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={interval === intervalOption.value}
+                  className={`toolbar-interval-strip__button ${
+                    interval === intervalOption.value ? 'toolbar-interval-strip__button--active' : ''
+                  }`}
+                  onClick={() => setInterval(intervalOption.value)}
+                >
+                  {intervalOption.label}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className={`toolbar-interval-strip__more ${isIntervalPanelOpen ? 'toolbar-interval-strip__more--open' : ''}`}
+              aria-haspopup="dialog"
+              aria-expanded={isIntervalPanelOpen}
+              title="更多周期"
+              onClick={() => setIsIntervalPanelOpen((value) => !value)}
+            >
+              <span aria-hidden="true" className="toolbar-interval-strip__more-icon">
+                <svg viewBox="0 0 16 16">
+                  <path d="M4.2 6.4L8 10.2l3.8-3.8" />
+                </svg>
+              </span>
+            </button>
+          </div>
 
-      <div className="toolbar-field toolbar-field--terminal">
-        <MarketSelect
-          label="交易对"
-          value={symbol}
-          options={marketSymbolOptions}
-          onChange={setSymbol}
-          disabled={marketSymbolOptions.length === 0 || marketSymbolOptions[0]?.disabled === true}
-          testId="symbol-select"
-        />
-      </div>
+          {isIntervalPanelOpen ? (
+            <div className="toolbar-interval-panel" role="dialog" aria-label="选择时间周期">
+              <div className="toolbar-interval-panel__header">
+                <strong>选择时间周期</strong>
+                <span>键盘 1-6 快捷切换</span>
+              </div>
+              <div className="toolbar-interval-panel__grid">
+                {EXTENDED_INTERVALS.map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    className={`toolbar-interval-panel__item ${
+                      interval === item.value ? 'toolbar-interval-panel__item--active' : ''
+                    } ${
+                      !item.enabled ? 'toolbar-interval-panel__item--disabled' : ''
+                    }`}
+                    disabled={!item.enabled}
+                    title={item.enabled ? `切换到 ${item.label}` : `${item.label} 即将支持`}
+                    onClick={() => {
+                      if (!item.enabled) {
+                        return;
+                      }
+                      setInterval(item.value);
+                      setIsIntervalPanelOpen(false);
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
-      <div className="toolbar-field toolbar-field--terminal">
-        <label className="toolbar-label" htmlFor="interval-select">周期</label>
-        <select
-          id="interval-select"
-          value={interval}
-          onChange={(event) => setInterval(event.target.value)}
-          className="toolbar-select toolbar-select--terminal"
-          data-testid="interval-select"
-        >
-          {INTERVALS.map((intervalOption) => (
-            <option key={intervalOption.value} value={intervalOption.value}>
-              {intervalOption.label}
-            </option>
-          ))}
-        </select>
+          <IndicatorSettingsButton
+            iconOnly
+            triggerClassName="toolbar-indicator-trigger"
+            settings={indicatorSettings}
+            onToggle={onToggleIndicator}
+          />
+        </div>
       </div>
     </div>
   );
 };
-
-function resolveBaseAsset(symbolOption: { value: string; label: string }) {
-  const labelBase = symbolOption.label.split('/')[0];
-
-  if (labelBase) {
-    return labelBase.toUpperCase();
-  }
-
-  return symbolOption.value.replace(/USDT$/i, '').slice(0, 6).toUpperCase();
-}

@@ -174,6 +174,53 @@ describe('marketStore', () => {
     await useMarketStore.getState().loadInitialKlines();
   });
 
+  it('tops up initial history to 2000 bars when the first response page is short', async () => {
+    const firstPage = Array.from({ length: 1000 }, (_, index) =>
+      makeKline({ open_time: 1_000_000 + index * 60_000, close_time: 1_000_001 + index * 60_000 }),
+    );
+    const secondPage = Array.from({ length: 1000 }, (_, index) =>
+      makeKline({ open_time: 1000 + index * 60_000, close_time: 1001 + index * 60_000 }),
+    );
+
+    const fetchSpy = vi
+      .fn()
+      .mockImplementationOnce(async (input: string) => {
+        expect(input).toContain('limit=2000');
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            source: 'remote',
+            hasMore: true,
+            klines: firstPage,
+          }),
+        } as Response;
+      })
+      .mockImplementationOnce(async (input: string) => {
+        expect(input).toContain('limit=1000');
+        expect(input).toContain(`before=${firstPage[0].open_time}`);
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            source: 'remote',
+            hasMore: true,
+            klines: secondPage,
+          }),
+        } as Response;
+      });
+
+    vi.stubGlobal('fetch', fetchSpy as typeof fetch);
+
+    await useMarketStore.getState().loadInitialKlines();
+
+    expect(useMarketStore.getState().klines).toHaveLength(2000);
+    expect(useMarketStore.getState().klines[0]?.open_time).toBe(secondPage[0].open_time);
+    expect(useMarketStore.getState().klines[useMarketStore.getState().klines.length - 1]?.open_time).toBe(
+      firstPage[firstPage.length - 1]?.open_time,
+    );
+  });
+
   it('requests older bars before the current earliest open time', async () => {
     vi.stubGlobal(
       'fetch',
@@ -240,6 +287,43 @@ describe('marketStore', () => {
 
     await useMarketStore.getState().loadOlderKlines();
 
+    expect(useMarketStore.getState().hasMoreHistoricalKlines).toBe(false);
+  });
+
+  it('keeps hasMore enabled and exposes retry state when loading older history fails', async () => {
+    const fetchSpy = vi
+      .fn()
+      .mockImplementationOnce(async () => ({
+        ok: false,
+        status: 502,
+        text: async () => '',
+      }) as Response)
+      .mockImplementationOnce(async () => ({
+        ok: true,
+        json: async () => ({
+          success: true,
+          source: 'cache',
+          hasMore: false,
+          klines: [makeKline({ open_time: 50, close_time: 51 })],
+        }),
+      }) as Response);
+    vi.stubGlobal('fetch', fetchSpy as typeof fetch);
+
+    useMarketStore.setState({
+      klines: [makeKline({ open_time: 100, close_time: 101 })],
+      hasMoreHistoricalKlines: true,
+      olderKlineLoadError: null,
+    } as Partial<ReturnType<typeof useMarketStore.getState>>);
+
+    await useMarketStore.getState().loadOlderKlines();
+
+    expect(useMarketStore.getState().hasMoreHistoricalKlines).toBe(true);
+    expect(useMarketStore.getState().olderKlineLoadError).toContain('HTTP 502');
+
+    await useMarketStore.getState().retryLoadOlderKlines();
+
+    expect(useMarketStore.getState().olderKlineLoadError).toBeNull();
+    expect(useMarketStore.getState().klines[0]?.open_time).toBe(50);
     expect(useMarketStore.getState().hasMoreHistoricalKlines).toBe(false);
   });
 
@@ -336,6 +420,53 @@ describe('marketStore', () => {
     expect(useMarketStore.getState().klines).toEqual([
       makeKline({ exchange: 'okx', symbol: 'ETHUSDT', interval: '5m', open_time: 5 }),
     ]);
+  });
+
+  it('updates latestPrice when realtime kline updates are merged', () => {
+    useMarketStore.setState({
+      exchange: 'binance',
+      symbol: 'BTCUSDT',
+      interval: '1h',
+      klines: [
+        makeKline({ open_time: 100, close_time: 101, close: 110 }),
+      ],
+      latestPrice: 110,
+    } as Partial<ReturnType<typeof useMarketStore.getState>>);
+
+    useMarketStore.getState().updateKline(
+      makeKline({ open_time: 100, close_time: 101, close: 125 }),
+    );
+
+    expect(useMarketStore.getState().latestPrice).toBe(125);
+    expect(useMarketStore.getState().klines).toEqual([
+      makeKline({ open_time: 100, close_time: 101, close: 125 }),
+    ]);
+  });
+
+  it('merges polled klines in one normalized batch for the active market', () => {
+    useMarketStore.setState({
+      exchange: 'okx',
+      symbol: 'ETHUSDT',
+      interval: '1h',
+      klines: [
+        makeKline({ exchange: 'okx', symbol: 'ETHUSDT', interval: '1h', open_time: 100, close: 1000 }),
+      ],
+      latestPrice: 1000,
+    } as Partial<ReturnType<typeof useMarketStore.getState>>);
+
+    useMarketStore.getState().mergeKlines([
+      makeKline({ exchange: 'okx', symbol: 'ETHUSDT', interval: '1h', open_time: 300, close: 1300 }),
+      makeKline({ exchange: 'okx', symbol: 'ETHUSDT', interval: '1h', open_time: 200, close: 1200 }),
+      makeKline({ exchange: 'binance', symbol: 'BTCUSDT', interval: '1h', open_time: 999, close: 9999 }),
+      makeKline({ exchange: 'okx', symbol: 'ETHUSDT', interval: '1h', open_time: 300, close: 1350 }),
+    ]);
+
+    expect(useMarketStore.getState().klines).toEqual([
+      makeKline({ exchange: 'okx', symbol: 'ETHUSDT', interval: '1h', open_time: 100, close: 1000 }),
+      makeKline({ exchange: 'okx', symbol: 'ETHUSDT', interval: '1h', open_time: 200, close: 1200 }),
+      makeKline({ exchange: 'okx', symbol: 'ETHUSDT', interval: '1h', open_time: 300, close: 1350 }),
+    ]);
+    expect(useMarketStore.getState().latestPrice).toBe(1350);
   });
 
   it('updates the latest price independently without mutating the loaded klines', () => {

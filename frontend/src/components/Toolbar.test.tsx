@@ -1,20 +1,10 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SymbolOption } from '../types';
+import type { IndicatorSettings } from '../types';
 
 const mockMarketState = {
-  exchange: 'binance',
-  symbol: 'ETHUSDT',
   interval: '1h',
-  symbols: [
-    { value: 'BTCUSDT', label: 'BTC/USDT', baseAsset: 'BTC', quoteAsset: 'USDT' },
-    { value: 'ETHUSDT', label: 'ETH/USDT', baseAsset: 'ETH', quoteAsset: 'USDT' },
-  ] as SymbolOption[],
-  isLoadingSymbols: false,
-  setExchange: vi.fn(),
-  setSymbol: vi.fn(),
   setInterval: vi.fn(),
-  fetchSymbols: vi.fn(async () => undefined),
 };
 
 vi.mock('../stores/marketStore', () => ({
@@ -24,28 +14,33 @@ vi.mock('../stores/marketStore', () => ({
 
 import { Toolbar } from './Toolbar';
 
+const indicatorSettings: IndicatorSettings = {
+  volume: false,
+  ma5: true,
+  ma10: false,
+  ma20: false,
+};
+const onToggleIndicator = vi.fn();
+
 describe('Toolbar', () => {
   beforeEach(() => {
-    mockMarketState.exchange = 'binance';
-    mockMarketState.symbol = 'ETHUSDT';
     mockMarketState.interval = '1h';
-    mockMarketState.symbols = [
-      { value: 'BTCUSDT', label: 'BTC/USDT', baseAsset: 'BTC', quoteAsset: 'USDT' },
-      { value: 'ETHUSDT', label: 'ETH/USDT', baseAsset: 'ETH', quoteAsset: 'USDT' },
-    ];
-    mockMarketState.isLoadingSymbols = false;
   });
 
-  it('renders icon-aware custom controls for exchange and symbol fields', () => {
-    const markup = renderToStaticMarkup(<Toolbar />);
+  it('renders compact interval controls and indicator trigger', () => {
+    const markup = renderToStaticMarkup(
+      <Toolbar
+        indicatorSettings={indicatorSettings}
+        onToggleIndicator={onToggleIndicator}
+      />,
+    );
 
-    expect(markup).toContain('data-testid="exchange-select-trigger"');
-    expect(markup).toContain('data-testid="symbol-select-trigger"');
-    expect(markup).toContain('market-icon--exchange');
-    expect(markup).toContain('market-icon--exchange-binance');
-    expect(markup).toContain('market-icon--asset');
-    expect(markup).toContain('market-icon--asset-eth');
-    expect(markup).toContain('ETH/USDT');
-    expect(markup).toContain('id="interval-select"');
+    expect(markup).toContain('toolbar-inline__rail');
+    expect(markup).toContain('toolbar-terminal__actions');
+    expect(markup).toContain('toolbar-interval-strip');
+    expect(markup).toContain('toolbar-interval-strip__button');
+    expect(markup).toContain('toolbar-indicator-trigger');
+    expect(markup).toContain('1\u5c0f\u65f6');
+    expect(markup).not.toContain('\\u');
   });
 });

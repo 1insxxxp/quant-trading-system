@@ -8,12 +8,22 @@ import { klineService } from './services/kline.service.js';
 import { syncStateService } from './services/sync-state.service.js';
 import { WebSocketService } from './services/websocket.service.js';
 import { runStartupSequence } from './startup/startup.js';
+import type { ChartIndicatorSettings } from './types/index.js';
 
 const app = express();
 const PORT = Number(process.env.PORT ?? 4000);
 const WS_PORT = Number(process.env.WS_PORT ?? 4001);
 const DEFAULT_INITIAL_KLINE_LIMIT = 2000;
 const DEFAULT_HISTORY_PAGE_SIZE = 1000;
+const APP_VERSION = process.env.APP_VERSION ?? process.env.npm_package_version ?? 'dev';
+const DEFAULT_INDICATOR_SETTINGS: ChartIndicatorSettings = {
+  volume: false,
+  ma5: false,
+  ma10: false,
+  ma20: false,
+};
+
+let volatileIndicatorSettings: ChartIndicatorSettings = { ...DEFAULT_INDICATOR_SETTINGS };
 
 app.use(cors());
 app.use(express.json());
@@ -22,6 +32,22 @@ app.get('/api/health', (_req, res) => {
   res.json({
     success: true,
     status: 'ok',
+    timestamp: Date.now(),
+  });
+});
+
+app.get('/version', (_req, res) => {
+  res.json({
+    success: true,
+    version: APP_VERSION,
+    timestamp: Date.now(),
+  });
+});
+
+app.get('/api/version', (_req, res) => {
+  res.json({
+    success: true,
+    version: APP_VERSION,
     timestamp: Date.now(),
   });
 });
@@ -99,33 +125,42 @@ app.get('/api/symbols', async (req, res) => {
 app.get('/api/preferences/chart-indicators', async (_req, res) => {
   try {
     const settings = await db.getChartIndicatorSettings();
+    volatileIndicatorSettings = normalizeIndicatorSettings(settings);
 
     res.json({
       success: true,
-      settings,
+      settings: volatileIndicatorSettings,
+      storage: 'database',
     });
   } catch (error: any) {
-    console.error('Failed to load chart indicator settings:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message,
+    console.warn('Chart indicator settings fallback to volatile storage:', error.message);
+    res.json({
+      success: true,
+      settings: volatileIndicatorSettings,
+      storage: 'volatile',
     });
   }
 });
 
 app.put('/api/preferences/chart-indicators', async (req, res) => {
+  const nextSettings = normalizeIndicatorSettings(req.body?.settings ?? {});
+
   try {
-    const settings = await db.saveChartIndicatorSettings(req.body?.settings ?? {});
+    const settings = await db.saveChartIndicatorSettings(nextSettings);
+    volatileIndicatorSettings = normalizeIndicatorSettings(settings);
 
     res.json({
       success: true,
-      settings,
+      settings: volatileIndicatorSettings,
+      storage: 'database',
     });
   } catch (error: any) {
-    console.error('Failed to save chart indicator settings:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message,
+    console.warn('Chart indicator settings persist failed, switching to volatile storage:', error.message);
+    volatileIndicatorSettings = nextSettings;
+    res.json({
+      success: true,
+      settings: volatileIndicatorSettings,
+      storage: 'volatile',
     });
   }
 });
@@ -189,11 +224,24 @@ async function initExchangeData() {
 function startServer() {
   runStartupSequence({
     startHttp: () => {
-      app.listen(PORT, () => {
+      const server = app.listen(PORT, () => {
         console.log(`Backend server started`);
         console.log(`  HTTP: http://localhost:${PORT}`);
         console.log(`  WebSocket: ws://localhost:${WS_PORT}`);
         console.log(`  Health: http://localhost:${PORT}/api/health`);
+      });
+
+      server.on('error', (error: NodeJS.ErrnoException) => {
+        if (error.code === 'EADDRINUSE') {
+          console.error(`❌ 端口 ${PORT} 已被占用，请检查是否有其他实例正在运行`);
+          console.error(`   提示：可以使用以下命令查找占用端口的进程：`);
+          console.error(`   Windows: netstat -ano | findstr :${PORT}`);
+          console.error(`   Linux/Mac: lsof -i :${PORT}`);
+          process.exit(1);
+        } else {
+          console.error('HTTP 服务器启动失败:', error);
+          process.exit(1);
+        }
       });
     },
     startWebSocket: () => {
@@ -216,9 +264,27 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection:', reason);
+});
+
 try {
   startServer();
 } catch (error) {
   console.error('Startup failed:', error);
   process.exit(1);
+}
+
+function normalizeIndicatorSettings(raw: unknown): ChartIndicatorSettings {
+  if (!raw || typeof raw !== 'object') {
+    return { ...DEFAULT_INDICATOR_SETTINGS };
+  }
+
+  const source = raw as Partial<Record<keyof ChartIndicatorSettings, unknown>>;
+  return {
+    volume: source.volume === true,
+    ma5: source.ma5 === true,
+    ma10: source.ma10 === true,
+    ma20: source.ma20 === true,
+  };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveProxyUrl } from './proxy.js';
+import { createProxyAgent, resolveProxyUrl } from './proxy.js';
 
 describe('resolveProxyUrl', () => {
   it('returns null when env vars are unset', () => {
@@ -15,5 +15,15 @@ describe('resolveProxyUrl', () => {
     });
 
     expect(proxyUrl).toBe('http://127.0.0.1:9999');
+  });
+});
+
+describe('createProxyAgent', () => {
+  it('creates an agent when a proxy url is configured', () => {
+    const agent = createProxyAgent({
+      HTTPS_PROXY: 'http://127.0.0.1:7890',
+    });
+
+    expect(agent).toBeDefined();
   });
 });

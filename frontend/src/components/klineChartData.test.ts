@@ -122,6 +122,7 @@ describe('shouldLoadOlderKlines', () => {
         isLoadingOlderKlines: false,
         hasMoreHistoricalKlines: true,
         isHistoryPagingReady: false,
+        hasOlderLoadError: false,
       }),
     ).toBe(false);
   });
@@ -133,6 +134,7 @@ describe('shouldLoadOlderKlines', () => {
         isLoadingOlderKlines: false,
         hasMoreHistoricalKlines: true,
         isHistoryPagingReady: true,
+        hasOlderLoadError: false,
       }),
     ).toBe(true);
   });
@@ -144,6 +146,19 @@ describe('shouldLoadOlderKlines', () => {
         isLoadingOlderKlines: true,
         hasMoreHistoricalKlines: true,
         isHistoryPagingReady: true,
+        hasOlderLoadError: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('does not auto-load while a previous older-history request is in error state', () => {
+    expect(
+      shouldLoadOlderKlines({
+        visibleFrom: 20,
+        isLoadingOlderKlines: false,
+        hasMoreHistoricalKlines: true,
+        isHistoryPagingReady: true,
+        hasOlderLoadError: true,
       }),
     ).toBe(false);
   });

@@ -47,6 +47,7 @@ export interface MarketState {
   isLoadingSymbols: boolean;
   isLoadingKlines: boolean;
   isLoadingOlderKlines: boolean;
+  olderKlineLoadError: string | null;
   hasMoreHistoricalKlines: boolean;
   indicatorSettings: IndicatorSettings;
   isLoadingIndicatorSettings: boolean;
@@ -56,11 +57,13 @@ export interface MarketState {
   setSymbol: (symbol: string) => void;
   setInterval: (interval: string) => void;
   setKlines: (klines: Kline[]) => void;
+  mergeKlines: (klines: Kline[]) => void;
   updateKline: (kline: Kline) => void;
   setLatestPrice: (price: number, timestamp?: number) => void;
   setIsConnected: (connected: boolean) => void;
   loadInitialKlines: () => Promise<void>;
   loadOlderKlines: () => Promise<void>;
+  retryLoadOlderKlines: () => Promise<void>;
   fetchSymbols: () => Promise<void>;
   fetchIndicatorSettings: () => Promise<void>;
   updateIndicatorSetting: (indicatorId: IndicatorId, enabled: boolean) => Promise<void>;

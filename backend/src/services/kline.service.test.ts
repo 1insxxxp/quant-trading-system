@@ -10,9 +10,11 @@ const { mockDb, binanceAdapterMock, okxAdapterMock, syncStateMock } = vi.hoisted
   },
   binanceAdapterMock: {
     getKlines: vi.fn(),
+    getSymbols: vi.fn(),
   },
   okxAdapterMock: {
     getKlines: vi.fn(),
+    getSymbols: vi.fn(),
   },
   syncStateMock: {
     recordHistorySyncSuccess: vi.fn(),
@@ -65,6 +67,8 @@ describe('KlineService', () => {
     mockDb.getKlineSyncState.mockResolvedValue(null);
     mockDb.saveKline.mockResolvedValue(undefined);
     mockDb.saveKlines.mockResolvedValue(undefined);
+    binanceAdapterMock.getSymbols.mockResolvedValue([]);
+    okxAdapterMock.getSymbols.mockResolvedValue([]);
   });
 
   it('fetches and persists klines when the requested market is missing from cache', async () => {
@@ -221,5 +225,44 @@ describe('KlineService', () => {
 
     expect(mockDb.getKlines).toHaveBeenCalledWith('binance', 'BTCUSDT', '1m', 3, 240_000);
     expect(result.map((item) => item.open_time)).toEqual([120_000, 180_000]);
+  });
+
+  it('falls back to exchange symbols when database is unavailable', async () => {
+    mockDb.getSymbols.mockRejectedValue(new Error('db offline'));
+    binanceAdapterMock.getSymbols.mockResolvedValue([
+      {
+        exchange: 'binance',
+        symbol: 'BTCUSDT',
+        base_asset: 'BTC',
+        quote_asset: 'USDT',
+        type: 'spot',
+        status: 'active',
+      },
+      {
+        exchange: 'binance',
+        symbol: 'ETHUSDT',
+        base_asset: 'ETH',
+        quote_asset: 'USDT',
+        type: 'spot',
+        status: 'active',
+      },
+    ]);
+
+    const service = new KlineService();
+
+    const symbols = await service.getSymbols('binance', 'spot');
+
+    expect(binanceAdapterMock.getSymbols).toHaveBeenCalledTimes(1);
+    expect(okxAdapterMock.getSymbols).not.toHaveBeenCalled();
+    expect(symbols.map((item) => item.symbol)).toEqual(['BTCUSDT', 'ETHUSDT']);
+  });
+
+  it('returns null for latest cached kline when database is unavailable', async () => {
+    mockDb.getKlines.mockRejectedValue(new Error('db offline'));
+
+    const service = new KlineService();
+    const result = await service.getLatestCachedKline('binance', 'ETHUSDT', '1h');
+
+    expect(result).toBeNull();
   });
 });

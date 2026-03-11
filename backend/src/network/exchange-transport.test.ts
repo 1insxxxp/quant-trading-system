@@ -53,6 +53,15 @@ describe('createTransportAttempts', () => {
     expect(attempts[1].agent).toBeUndefined();
   });
 
+  it('can instantiate proxy attempts without throwing under the runtime loader', () => {
+    const config = createExchangeTransportConfig({
+      EXCHANGE_WS_TRANSPORT: 'proxy',
+      EXCHANGE_PROXY_URL: 'http://127.0.0.1:7890',
+    });
+
+    expect(() => createTransportAttempts(config.ws, config.proxyUrl)).not.toThrow();
+  });
+
   it('skips proxy attempts when no proxy URL is available', () => {
     const config = createExchangeTransportConfig({
       EXCHANGE_WS_TRANSPORT: 'auto',

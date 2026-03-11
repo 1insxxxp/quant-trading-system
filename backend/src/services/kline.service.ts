@@ -34,10 +34,17 @@ export class KlineService {
     before?: number,
   ): Promise<KlineQueryResult> {
     const requestLimit = limit + 1;
-    const syncState = await db.getKlineSyncState(exchange, symbol, interval);
-    const cached = normalizeKlines(
-      await db.getKlines(exchange, symbol, interval, requestLimit, before) as Kline[],
-    );
+    let syncState: Awaited<ReturnType<typeof db.getKlineSyncState>> | null = null;
+    let cached: Kline[] = [];
+
+    try {
+      syncState = await db.getKlineSyncState(exchange, symbol, interval);
+      cached = normalizeKlines(
+        await db.getKlines(exchange, symbol, interval, requestLimit, before) as Kline[],
+      );
+    } catch (error: any) {
+      console.warn(`DB unavailable for klines ${exchange}:${symbol}:${interval}: ${error.message}`);
+    }
 
     if (cached.length >= requestLimit) {
       return {
@@ -69,15 +76,19 @@ export class KlineService {
       const responseKlines = mergedKlines.slice(-limit);
 
       if (remoteKlines.length > 0) {
-        await this.saveKlines(remoteKlines);
-        await syncStateService.recordHistorySyncSuccess(
-          exchange,
-          symbol,
-          interval,
-          mergedKlines,
-          hasMore,
-          exchange,
-        );
+        try {
+          await this.saveKlines(remoteKlines);
+          await syncStateService.recordHistorySyncSuccess(
+            exchange,
+            symbol,
+            interval,
+            mergedKlines,
+            hasMore,
+            exchange,
+          );
+        } catch (persistError: any) {
+          console.warn(`Persist remote klines skipped: ${persistError.message}`);
+        }
         return {
           klines: responseKlines,
           source: responseKlines.length === cached.length ? 'cache' : 'remote',
@@ -85,18 +96,26 @@ export class KlineService {
         };
       }
 
-      await syncStateService.recordHistorySyncSuccess(
-        exchange,
-        symbol,
-        interval,
-        cached,
-        false,
-        exchange,
-      );
+      try {
+        await syncStateService.recordHistorySyncSuccess(
+          exchange,
+          symbol,
+          interval,
+          cached,
+          false,
+          exchange,
+        );
+      } catch (persistError: any) {
+        console.warn(`Persist sync state skipped: ${persistError.message}`);
+      }
       return this.buildFallbackResult(cached, limit, false);
     } catch (error: any) {
       console.error('Failed to load remote klines:', error.message);
-      await syncStateService.recordHistorySyncError(exchange, symbol, interval, error);
+      try {
+        await syncStateService.recordHistorySyncError(exchange, symbol, interval, error);
+      } catch (persistError: any) {
+        console.warn(`Persist sync error skipped: ${persistError.message}`);
+      }
       return this.buildFallbackResult(cached, limit, syncState?.has_more_history ?? false);
     }
   }
@@ -118,8 +137,13 @@ export class KlineService {
     symbol: string,
     interval: string,
   ): Promise<Kline | null> {
-    const klines = await db.getKlines(exchange, symbol, interval, 1) as Kline[];
-    return klines[0] ?? null;
+    try {
+      const klines = await db.getKlines(exchange, symbol, interval, 1) as Kline[];
+      return klines[0] ?? null;
+    } catch (error: any) {
+      console.warn(`DB unavailable for latest cached kline ${exchange}:${symbol}:${interval}: ${error.message}`);
+      return null;
+    }
   }
 
   async recoverGapKlines(
@@ -158,7 +182,32 @@ export class KlineService {
   }
 
   async getSymbols(exchange?: string, type?: string): Promise<any[]> {
-    return db.getSymbols(exchange, type);
+    try {
+      return await db.getSymbols(exchange, type);
+    } catch (error: any) {
+      console.warn(`DB unavailable for symbols query: ${error.message}`);
+    }
+
+    const exchanges = exchange ? [exchange] : this.getExchanges();
+    const resolvedType = type ?? 'spot';
+    const results = await Promise.all(
+      exchanges.map(async (exchangeName) => {
+        const adapter = this.adapters.get(exchangeName);
+        if (!adapter) {
+          return [];
+        }
+
+        try {
+          const symbols = await adapter.getSymbols();
+          return symbols.filter((item) => item.type === resolvedType);
+        } catch (error: any) {
+          console.error(`Failed to fetch symbols from ${exchangeName}:`, error.message);
+          return [];
+        }
+      }),
+    );
+
+    return results.flat();
   }
 
   private buildFallbackResult(cached: Kline[], limit: number, persistedHasMore: boolean = false): KlineQueryResult {

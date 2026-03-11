@@ -11,6 +11,7 @@ const mockMarketState = {
   isConnected: true,
   isLoadingKlines: false,
   isLoadingOlderKlines: false,
+  olderKlineLoadError: null as string | null,
   indicatorSettings: {
     volume: false,
     ma5: false,
@@ -18,6 +19,7 @@ const mockMarketState = {
     ma20: false,
   } as IndicatorSettings,
   updateIndicatorSetting: vi.fn(),
+  retryLoadOlderKlines: vi.fn(async () => undefined),
 };
 
 vi.mock('../stores/marketStore', () => ({
@@ -41,6 +43,7 @@ describe('KlineChart', () => {
     mockMarketState.isConnected = true;
     mockMarketState.isLoadingKlines = false;
     mockMarketState.isLoadingOlderKlines = false;
+    mockMarketState.olderKlineLoadError = null;
     mockMarketState.indicatorSettings = {
       volume: false,
       ma5: false,
@@ -49,7 +52,7 @@ describe('KlineChart', () => {
     };
   });
 
-  it('renders a slimmer chart workspace header around the toolbar and indicator entry', () => {
+  it('renders a slimmer chart workspace header around the terminal toolbar', () => {
     mockMarketState.klines = Array.from({ length: 20 }, (_, index) => ({
       exchange: 'binance',
       symbol: 'ETHUSDT',
@@ -68,24 +71,15 @@ describe('KlineChart', () => {
     const markup = renderToStaticMarkup(<KlineChart />);
 
     expect(markup).toContain('toolbar');
-    expect(markup).toContain('指标');
     expect(markup).toContain('chart-workspace__header');
+    expect(markup).toContain('chart-workspace__header--terminal');
     expect(markup).toContain('chart-workspace__header-main');
-    expect(markup).toContain('chart-workspace__header-actions');
+    expect(markup).not.toContain('chart-workspace__header-actions');
     expect(markup).toContain('chart-panel__hud');
-    expect(markup).toContain('ETH/USDT · 5分钟 · BINANCE');
-    expect(markup).toContain('chart-inspector__metric-label">开<');
+    expect(markup).toContain('chart-panel__hud--terminal');
+    expect(markup).toContain('ETH/USDT \u00b7 5\u5206\u949f \u00b7 BINANCE');
+    expect(markup).toContain('chart-inspector__metric-label">\u5f00<');
     expect(markup).toContain('2,019.00');
-    expect(markup).not.toContain('chart-workspace__toolbar-shell');
-    expect(markup).not.toContain('chart-badges');
-    expect(markup).not.toContain('缓存');
-    expect(markup).not.toContain('推送中');
-    expect(markup).not.toContain('chart-panel__summary-row');
-    expect(markup).not.toContain('成交量');
-    expect(markup).not.toContain('成交额');
-    expect(markup).not.toContain('MA5');
-    expect(markup).not.toContain('MA10');
-    expect(markup).not.toContain('MA20');
   });
 
   it('renders enabled indicators in the legend', () => {
@@ -112,10 +106,9 @@ describe('KlineChart', () => {
 
     const markup = renderToStaticMarkup(<KlineChart />);
 
-    expect(markup).toContain('成交量(Volume)');
+    expect(markup).toContain('\u6210\u4ea4\u91cf (Volume)');
     expect(markup).toContain('MA5');
     expect(markup).not.toContain('MA10');
     expect(markup).not.toContain('MA20');
-    expect(markup).not.toContain('成交额');
   });
 });

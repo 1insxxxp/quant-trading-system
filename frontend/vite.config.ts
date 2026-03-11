@@ -12,6 +12,19 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/quant/, ''),
       },
+      '/api/version': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+      },
+      '/version': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+      },
+      '/quant/version': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/quant/, ''),
+      },
       '/quant/ws': {
         target: 'ws://localhost:4001',
         changeOrigin: true,

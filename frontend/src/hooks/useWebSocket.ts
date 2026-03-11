@@ -1,25 +1,40 @@
 import { useEffect } from 'react';
+import { createSingleFlightRunner } from '../lib/singleFlight';
 import { createMarketSocketClient, type MarketSocketMessage } from '../lib/marketSocket';
 import { getMarketKey, useMarketStore } from '../stores/marketStore';
 import type { Kline, PriceUpdate } from '../types/index';
 
+const FALLBACK_POLL_INTERVAL_MS = 1200;
+const SPARSE_HISTORY_THRESHOLD = 120;
+const SPARSE_HISTORY_POLL_LIMIT = 240;
+const REALTIME_POLL_LIMIT = 2;
+const PRICE_FALLBACK_INTERVAL = '1m';
+const PRICE_STALE_THRESHOLD_MS = 5_000;
+
 export const useWebSocket = () => {
-  const {
-    exchange,
-    symbol,
-    interval,
-    updateKline,
-    setLatestPrice,
-    setIsConnected,
-    loadInitialKlines,
-  } = useMarketStore();
+  const exchange = useMarketStore((state) => state.exchange);
+  const symbol = useMarketStore((state) => state.symbol);
+  const interval = useMarketStore((state) => state.interval);
+  const isConnected = useMarketStore((state) => state.isConnected);
+  const klineCount = useMarketStore((state) => state.klines.length);
+  const lastPriceTimestamp = useMarketStore((state) => state.lastPriceTimestamp);
+  const isLoadingKlines = useMarketStore((state) => state.isLoadingKlines);
+  const mergeKlines = useMarketStore((state) => state.mergeKlines);
+  const updateKline = useMarketStore((state) => state.updateKline);
+  const setLatestPrice = useMarketStore((state) => state.setLatestPrice);
+  const setIsConnected = useMarketStore((state) => state.setIsConnected);
+  const loadInitialKlines = useMarketStore((state) => state.loadInitialKlines);
+  const hasSparseHistory = klineCount < SPARSE_HISTORY_THRESHOLD;
+  const hasStalePrice = (
+    typeof lastPriceTimestamp !== 'number' ||
+    Date.now() - lastPriceTimestamp > PRICE_STALE_THRESHOLD_MS
+  );
 
   useEffect(() => {
     void loadInitialKlines();
 
     const marketKey = getMarketKey(exchange, symbol, interval);
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.host}/quant/ws`;
+    const wsUrl = resolveWebSocketUrl();
 
     const client = createMarketSocketClient({
       url: wsUrl,
@@ -91,5 +106,144 @@ export const useWebSocket = () => {
     };
   }, [exchange, symbol, interval, loadInitialKlines, setIsConnected, setLatestPrice, updateKline]);
 
+  useEffect(() => {
+    const shouldPollKline = !isLoadingKlines && (!isConnected || hasSparseHistory);
+    const shouldPollPrice = !isLoadingKlines && (!isConnected || hasStalePrice);
+    const shouldPoll = shouldPollKline || shouldPollPrice;
+
+    if (!shouldPoll) {
+      return undefined;
+    }
+
+    let disposed = false;
+    const abortController = new AbortController();
+    const runSingleFlightPoll = createSingleFlightRunner();
+    const pollLimit = hasSparseHistory ? SPARSE_HISTORY_POLL_LIMIT : REALTIME_POLL_LIMIT;
+    const marketKey = getMarketKey(exchange, symbol, interval);
+
+    const pollLatestKline = async () => {
+      try {
+        const response = await fetch(
+          `/quant/api/klines?exchange=${exchange}&symbol=${symbol}&interval=${interval}&limit=${pollLimit}`,
+          { signal: abortController.signal },
+        );
+        const payload = await response.json() as {
+          success?: boolean;
+          klines?: Kline[];
+        };
+
+        if (
+          disposed ||
+          abortController.signal.aborted ||
+          getMarketKey(useMarketStore.getState().exchange, useMarketStore.getState().symbol, useMarketStore.getState().interval) !== marketKey
+        ) {
+          return;
+        }
+
+        if (payload.success !== true || !Array.isArray(payload.klines) || payload.klines.length === 0) {
+          return;
+        }
+
+        const sorted = [...payload.klines].sort((left, right) => left.open_time - right.open_time);
+        mergeKlines(sorted);
+
+        const latest = sorted[sorted.length - 1];
+        if (latest) {
+          setLatestPrice(latest.close, latest.close_time ?? latest.open_time);
+        }
+      } catch (error) {
+        if (isAbortError(error)) {
+          return;
+        }
+
+        // Keep quiet when the backend is temporarily unavailable; websocket retry continues in parallel.
+      }
+    };
+
+    const pollLatestPrice = async () => {
+      try {
+        const response = await fetch(
+          `/quant/api/klines?exchange=${exchange}&symbol=${symbol}&interval=${PRICE_FALLBACK_INTERVAL}&limit=1`,
+          { signal: abortController.signal },
+        );
+        const payload = await response.json() as {
+          success?: boolean;
+          klines?: Kline[];
+        };
+
+        if (
+          disposed ||
+          abortController.signal.aborted ||
+          getMarketKey(useMarketStore.getState().exchange, useMarketStore.getState().symbol, useMarketStore.getState().interval) !== marketKey
+        ) {
+          return;
+        }
+
+        if (payload.success !== true || !Array.isArray(payload.klines) || payload.klines.length === 0) {
+          return;
+        }
+
+        const latest = payload.klines[payload.klines.length - 1];
+        if (latest) {
+          setLatestPrice(latest.close, Date.now());
+        }
+      } catch (error) {
+        if (isAbortError(error)) {
+          return;
+        }
+
+        // Keep quiet when the backend is temporarily unavailable; websocket retry continues in parallel.
+      }
+    };
+
+    const pollAll = async () => {
+      const tasks: Promise<void>[] = [];
+
+      if (shouldPollKline) {
+        tasks.push(pollLatestKline());
+      }
+
+      if (shouldPollPrice) {
+        tasks.push(pollLatestPrice());
+      }
+
+      await Promise.all(tasks);
+    };
+
+    void runSingleFlightPoll(pollAll);
+    const timer = window.setInterval(() => {
+      void runSingleFlightPoll(pollAll);
+    }, FALLBACK_POLL_INTERVAL_MS);
+
+    return () => {
+      disposed = true;
+      abortController.abort();
+      window.clearInterval(timer);
+    };
+  }, [exchange, symbol, interval, isConnected, isLoadingKlines, hasSparseHistory, hasStalePrice, mergeKlines, setLatestPrice]);
+
   return null;
 };
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException
+    ? error.name === 'AbortError'
+    : error instanceof Error && error.name === 'AbortError';
+}
+
+function resolveWebSocketUrl(): string {
+  const envUrl = import.meta.env.VITE_WS_URL as string | undefined;
+
+  if (typeof envUrl === 'string' && envUrl.trim().length > 0) {
+    return envUrl.trim();
+  }
+
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const isLocalHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+  if (import.meta.env.DEV && isLocalHost) {
+    return `${wsProtocol}//${window.location.hostname}:4001/quant/ws`;
+  }
+
+  return `${wsProtocol}//${window.location.host}/quant/ws`;
+}

@@ -41,6 +41,7 @@ export class DatabaseService {
   constructor(pool?: PgQueryable) {
     this.pool = pool ?? new Pool(DB_CONFIG);
     this.initPromise = this.init();
+    void this.initPromise.catch(() => undefined);
   }
 
   ready(): Promise<void> {

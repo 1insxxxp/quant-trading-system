@@ -10,6 +10,7 @@ class FakeWebSocket {
   onclose: (() => void) | null = null;
   onerror: ((error: unknown) => void) | null = null;
   onopen: (() => void) | null = null;
+  private listeners: Record<string, Array<(...args: any[]) => void>> = {};
 
   constructor(url: string, options?: Record<string, unknown>) {
     FakeWebSocket.calls.push({ url, options });
@@ -17,19 +18,48 @@ class FakeWebSocket {
 
     queueMicrotask(() => {
       if (behavior === 'error-before-open') {
+        this.emit('error', new Error('handshake failed'));
         this.onerror?.(new Error('handshake failed'));
+        this.emit('close');
         this.onclose?.();
         return;
       }
 
+      this.emit('open');
       this.onopen?.();
     });
+  }
+
+  on(event: string, handler: (...args: any[]) => void) {
+    this.listeners[event] ??= [];
+    this.listeners[event].push(handler);
+    return this;
+  }
+
+  once(event: string, handler: (...args: any[]) => void) {
+    const wrapped = (...args: any[]) => {
+      this.off(event, wrapped);
+      handler(...args);
+    };
+    return this.on(event, wrapped);
+  }
+
+  off(event: string, handler: (...args: any[]) => void) {
+    this.listeners[event] = (this.listeners[event] ?? []).filter((item) => item !== handler);
+    return this;
   }
 
   send() {}
 
   close() {
+    this.emit('close');
     this.onclose?.();
+  }
+
+  private emit(event: string, ...args: any[]) {
+    for (const handler of this.listeners[event] ?? []) {
+      handler(...args);
+    }
   }
 }
 

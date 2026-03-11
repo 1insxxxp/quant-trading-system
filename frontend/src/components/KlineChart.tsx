@@ -3,8 +3,8 @@ import {
   createChart,
   type CandlestickData,
   type IChartApi,
-  type MouseEventParams,
   type ISeriesApi,
+  type MouseEventParams,
   type Time,
 } from 'lightweight-charts';
 import { formatMarketSymbol } from '../lib/marketDisplay';
@@ -17,7 +17,6 @@ import {
 import { useMarketStore } from '../stores/marketStore';
 import { type ThemeMode, useUiStore } from '../stores/uiStore';
 import { ChartInspector, type ChartInspectorSnapshot } from './ChartInspector';
-import { IndicatorSettingsButton } from './IndicatorSettingsButton';
 import { Toolbar } from './Toolbar';
 import {
   buildCandlestickData,
@@ -34,6 +33,10 @@ import {
 import type { Kline } from '../types';
 
 const MIN_CHART_HEIGHT = 460;
+const MIN_RESTORED_VISIBLE_BARS = 24;
+const MIN_DEFAULT_VISIBLE_BARS = 80;
+const DEFAULT_RIGHT_PADDING_BARS = 6;
+const LOADING_SIGNAL_BARS = Array.from({ length: 12 }, (_, index) => index);
 
 export const KlineChart: React.FC = () => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -57,8 +60,10 @@ export const KlineChart: React.FC = () => {
     interval,
     isLoadingKlines,
     isLoadingOlderKlines,
+    olderKlineLoadError,
     indicatorSettings,
     updateIndicatorSetting,
+    retryLoadOlderKlines,
   } = useMarketStore();
 
   useEffect(() => {
@@ -85,7 +90,6 @@ export const KlineChart: React.FC = () => {
       localization: {
         timeFormatter: (time: Time) => {
           const timestamp = resolveTimestampFromChartTime(time);
-
           return timestamp === null ? '' : formatChartCrosshairTime(timestamp);
         },
       },
@@ -155,8 +159,8 @@ export const KlineChart: React.FC = () => {
 
     const resizeObserver = typeof ResizeObserver !== 'undefined'
       ? new ResizeObserver(() => {
-          resizeChart();
-        })
+        resizeChart();
+      })
       : null;
 
     resizeObserver?.observe(chartContainerRef.current);
@@ -169,6 +173,7 @@ export const KlineChart: React.FC = () => {
           isLoadingOlderKlines: useMarketStore.getState().isLoadingOlderKlines,
           hasMoreHistoricalKlines: useMarketStore.getState().hasMoreHistoricalKlines,
           isHistoryPagingReady: isHistoryPagingReadyRef.current,
+          hasOlderLoadError: Boolean(useMarketStore.getState().olderKlineLoadError),
         })
       ) {
         void useMarketStore.getState().loadOlderKlines();
@@ -186,6 +191,15 @@ export const KlineChart: React.FC = () => {
 
       const state = useMarketStore.getState();
       const viewStateKey = buildChartViewStateKey(state.exchange, state.symbol, state.interval);
+
+      if (
+        state.klines.length < MIN_DEFAULT_VISIBLE_BARS ||
+        !hasUsableRestoredRange(chartVisibleRange, state.interval)
+      ) {
+        writeChartVisibleRange(viewStateKey, null);
+        return;
+      }
+
       writeChartVisibleRange(viewStateKey, chartVisibleRange);
     };
 
@@ -304,14 +318,15 @@ export const KlineChart: React.FC = () => {
         canRestoreChartVisibleRange(storedVisibleRange, {
           firstTime,
           lastTime,
-        })
+        }) &&
+        hasUsableRestoredRange(storedVisibleRange, interval)
       ) {
         chartRef.current.timeScale().setVisibleRange({
           from: storedVisibleRange.from as Time,
           to: storedVisibleRange.to as Time,
         });
       } else {
-        chartRef.current?.timeScale().fitContent();
+        applyDefaultVisibleRange(chartRef.current, data.length);
       }
 
       historyPagingArmFrameRef.current = window.requestAnimationFrame(() => {
@@ -380,20 +395,17 @@ export const KlineChart: React.FC = () => {
   const legendItems = buildIndicatorLegend(klines, indicatorSettings);
   const activeKline = hoveredKline ?? klines[klines.length - 1] ?? null;
   const activeSnapshot = buildInspectorSnapshot(activeKline);
-  const inspectorMarketLabel = `${formatMarketSymbol(symbol)} · ${formatChartIntervalLabel(interval)} · ${exchange.toUpperCase()}`;
+  const inspectorMarketLabel = `${formatMarketSymbol(symbol)} \u00b7 ${formatChartIntervalLabel(interval)} \u00b7 ${exchange.toUpperCase()}`;
   const activeDirection =
     activeSnapshot === null ? 'flat' : activeSnapshot.change > 0 ? 'up' : activeSnapshot.change < 0 ? 'down' : 'flat';
 
   return (
     <section className="chart-panel chart-workspace">
-      <div className="chart-workspace__header">
+      <div className="chart-workspace__header chart-workspace__header--terminal">
         <div className="chart-workspace__header-main">
-          <Toolbar />
-        </div>
-        <div className="chart-workspace__header-actions">
-          <IndicatorSettingsButton
-            settings={indicatorSettings}
-            onToggle={(indicatorId, enabled) => {
+          <Toolbar
+            indicatorSettings={indicatorSettings}
+            onToggleIndicator={(indicatorId, enabled) => {
               void updateIndicatorSetting(indicatorId, enabled);
             }}
           />
@@ -402,37 +414,60 @@ export const KlineChart: React.FC = () => {
 
       <div className={`chart-panel__body ${isLoadingKlines ? 'chart-panel__body--loading' : ''}`}>
         <div className="chart-panel__body-frame" />
-        <div className="chart-panel__hud">
-          <ChartInspector
-            marketLabel={inspectorMarketLabel}
-            snapshot={activeSnapshot}
-          />
-          {legendItems.length > 0 ? (
-            <div className="chart-panel__hud-legend">
-              {legendItems.map((item) => (
-                <span key={item.label} className={`chart-indicator ${item.colorClass}`}>
-                  {item.label}
-                  {item.value !== null ? ` ${item.value.toFixed(2)}` : ''}
-                </span>
-              ))}
+        {!isLoadingKlines ? (
+          <>
+            <div className="chart-panel__hud chart-panel__hud--terminal">
+              <ChartInspector
+                marketLabel={inspectorMarketLabel}
+                snapshot={activeSnapshot}
+              />
+              {legendItems.length > 0 ? (
+                <div className="chart-panel__hud-legend">
+                  {legendItems.map((item) => (
+                    <span key={item.label} className={`chart-indicator ${item.colorClass}`}>
+                      {item.label}
+                      {item.value !== null ? ` ${item.value.toFixed(2)}` : ''}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
             </div>
-          ) : null}
-        </div>
 
-        {indicatorSettings.volume && activeKline ? (
-          <div className={`chart-volume-legend chart-volume-legend--${activeDirection}`}>
-            <span className="chart-volume-legend__label">成交量(Volume)</span>
-            <span className="chart-volume-legend__value">
-              {formatChartVolumeLegendValue(activeKline.volume)}
-            </span>
-          </div>
-        ) : null}
+            {indicatorSettings.volume && activeKline ? (
+              <div className={`chart-volume-legend chart-volume-legend--${activeDirection}`}>
+                <span className="chart-volume-legend__label">{'\u6210\u4ea4\u91cf (Volume)'}</span>
+                <span className="chart-volume-legend__value">
+                  {formatChartVolumeLegendValue(activeKline.volume)}
+                </span>
+              </div>
+            ) : null}
 
-        {isLoadingOlderKlines && !isLoadingKlines ? (
-          <div className="chart-history-status" role="status" aria-live="polite">
-            <span className="chart-history-status__dot" aria-hidden="true" />
-            <span>正在加载更早的历史 K 线</span>
-          </div>
+            {isLoadingOlderKlines ? (
+              <div className="chart-history-status chart-history-status--loading" role="status" aria-live="polite">
+                <span className="chart-history-status__signal" aria-hidden="true">
+                  {Array.from({ length: 6 }, (_, index) => (
+                    <span key={index} className="chart-history-status__signal-bar" />
+                  ))}
+                </span>
+                <span>{'\u6b63\u5728\u52a0\u8f7d\u66f4\u65e9\u5386\u53f2 K \u7ebf...'}</span>
+              </div>
+            ) : null}
+
+            {!isLoadingOlderKlines && olderKlineLoadError ? (
+              <div className="chart-history-status chart-history-status--error" role="alert" aria-live="assertive">
+                <span>{olderKlineLoadError}</span>
+                <button
+                  type="button"
+                  className="chart-history-status__retry"
+                  onClick={() => {
+                    void retryLoadOlderKlines();
+                  }}
+                >
+                  {'重试'}
+                </button>
+              </div>
+            ) : null}
+          </>
         ) : null}
 
         <div
@@ -443,16 +478,20 @@ export const KlineChart: React.FC = () => {
 
         {isLoadingKlines ? (
           <div className="chart-overlay chart-overlay--loading">
-            <span className="chart-spinner" aria-hidden="true" />
-            <strong>正在加载 K 线数据</strong>
-            <span>切换已经生效，新的历史数据返回后会自动替换当前图表。</span>
+            <div className="chart-loading-signal" aria-hidden="true">
+              {LOADING_SIGNAL_BARS.map((barIndex) => (
+                <span key={barIndex} className="chart-loading-signal__bar" />
+              ))}
+            </div>
+            <strong>{'\u6b63\u5728\u52a0\u8f7d K \u7ebf\u6570\u636e...'}</strong>
+            <span>{'\u5207\u6362\u5df2\u751f\u6548\uff0c\u5386\u53f2\u6570\u636e\u8fd4\u56de\u540e\u4f1a\u81ea\u52a8\u66f4\u65b0\u5f53\u524d\u56fe\u8868\u3002'}</span>
           </div>
         ) : null}
 
         {!isLoadingKlines && klines.length === 0 ? (
           <div className="chart-overlay">
-            <strong>等待市场数据</strong>
-            <span>当前筛选条件下还没有可用 K 线，请稍后重试或切换市场。</span>
+            <strong>{'\u7b49\u5f85\u5e02\u573a\u6570\u636e'}</strong>
+            <span>{'\u5f53\u524d\u7b5b\u9009\u6761\u4ef6\u4e0b\u6ca1\u6709\u53ef\u7528 K \u7ebf\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u6216\u5207\u6362\u5e02\u573a\u3002'}</span>
           </div>
         ) : null}
       </div>
@@ -553,4 +592,54 @@ function normalizeChartVisibleRange(
 
 function normalizeChartTimeValue(time: Time | undefined): number | null {
   return typeof time === 'number' && Number.isFinite(time) ? time : null;
+}
+
+function hasUsableRestoredRange(
+  range: { from: number; to: number },
+  interval: string,
+): boolean {
+  const intervalSeconds = resolveIntervalSeconds(interval);
+  const spanSeconds = range.to - range.from;
+
+  if (!Number.isFinite(spanSeconds) || spanSeconds <= 0) {
+    return false;
+  }
+
+  return spanSeconds / intervalSeconds >= MIN_RESTORED_VISIBLE_BARS;
+}
+
+function resolveIntervalSeconds(interval: string): number {
+  switch (interval) {
+    case '1m':
+      return 60;
+    case '5m':
+      return 5 * 60;
+    case '15m':
+      return 15 * 60;
+    case '1h':
+      return 60 * 60;
+    case '4h':
+      return 4 * 60 * 60;
+    case '1d':
+      return 24 * 60 * 60;
+    default:
+      return 60 * 60;
+  }
+}
+
+function applyDefaultVisibleRange(chart: IChartApi | null, barCount: number) {
+  if (!chart) {
+    return;
+  }
+
+  if (barCount >= MIN_DEFAULT_VISIBLE_BARS) {
+    chart.timeScale().fitContent();
+    return;
+  }
+
+  const lastIndex = Math.max(0, barCount - 1);
+  chart.timeScale().setVisibleLogicalRange({
+    from: lastIndex - (MIN_DEFAULT_VISIBLE_BARS - 1),
+    to: lastIndex + DEFAULT_RIGHT_PADDING_BARS,
+  });
 }

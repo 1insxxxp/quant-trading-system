@@ -56,7 +56,7 @@ export function formatDocumentTitle({
   symbol,
   latestPrice,
 }: TitleSnapshot): string {
-  const market = `${formatMarketSymbol(symbol)} · ${exchange.toUpperCase()}`;
+  const market = `${formatMarketSymbol(symbol)} \u00b7 ${exchange.toUpperCase()}`;
 
   if (latestPrice === null) {
     return `${market} - 实时行情`;

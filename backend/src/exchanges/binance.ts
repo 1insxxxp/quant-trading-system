@@ -22,6 +22,7 @@ export class BinanceAdapter implements ExchangeAdapter {
   private readonly baseUrl = 'https://api.binance.com';
   private readonly wsUrl = 'wss://stream.binance.com:9443/ws';
   private readonly requestTimeoutMs = Number(process.env.EXCHANGE_REQUEST_TIMEOUT_MS ?? 2500);
+  private readonly wsHandshakeTimeoutMs = Number(process.env.EXCHANGE_WS_HANDSHAKE_TIMEOUT_MS ?? 10000);
   private readonly transportConfig: ExchangeTransportConfig;
   private readonly httpGet: HttpGet;
   private readonly WebSocketCtor: WebSocketCtor;
@@ -95,9 +96,9 @@ export class BinanceAdapter implements ExchangeAdapter {
     const key = `trades:${symbol}`;
 
     return this.openWebSocketWithFallback(wsUrl, key, 'trade', (ws) => {
-      ws.onmessage = (event) => {
+      ws.on('message', (payload) => {
         try {
-          const data = JSON.parse(event.data.toString());
+          const data = JSON.parse(payload.toString());
           const price = parseFloat(data.p);
           const quantity = parseFloat(data.q);
 
@@ -112,7 +113,7 @@ export class BinanceAdapter implements ExchangeAdapter {
         } catch (error: any) {
           console.error('Binance trade parse error:', error.message);
         }
-      };
+      });
     });
   }
 
@@ -126,9 +127,9 @@ export class BinanceAdapter implements ExchangeAdapter {
     const key = `kline:${symbol}:${interval}`;
 
     return this.openWebSocketWithFallback(wsUrl, key, 'kline', (ws) => {
-      ws.onmessage = (event) => {
+      ws.on('message', (payload) => {
         try {
-          const data = JSON.parse(event.data.toString());
+          const data = JSON.parse(payload.toString());
           const kline = data.k;
 
           callback({
@@ -149,7 +150,7 @@ export class BinanceAdapter implements ExchangeAdapter {
         } catch (error: any) {
           console.error('Binance kline parse error:', error.message);
         }
-      };
+      });
     });
   }
 
@@ -223,11 +224,8 @@ export class BinanceAdapter implements ExchangeAdapter {
       let retryScheduled = false;
       const ws = new this.WebSocketCtor(url, {
         agent: attempt.agent,
-        handshakeTimeout: this.requestTimeoutMs,
+        handshakeTimeout: this.wsHandshakeTimeoutMs,
       }) as WebSocket;
-      const existingOnOpen = ws.onopen;
-      const existingOnClose = ws.onclose;
-      const existingOnError = ws.onerror;
 
       activeSocket = ws;
       this.wsConnections.set(key, ws);
@@ -244,12 +242,11 @@ export class BinanceAdapter implements ExchangeAdapter {
         return true;
       };
 
-      ws.onopen = (event) => {
+      ws.once('open', (event) => {
         opened = true;
-        existingOnOpen?.call(ws, event);
-      };
+      });
 
-      ws.onerror = (error) => {
+      ws.on('error', (error) => {
         if (scheduleRetry()) {
           safeCloseWebSocket(ws);
           return;
@@ -259,21 +256,18 @@ export class BinanceAdapter implements ExchangeAdapter {
           return;
         }
 
-        existingOnError?.call(ws, error);
         console.error(`Binance ${label} WebSocket error via ${attempt.kind}:`, error);
-      };
+      });
 
-      ws.onclose = (event) => {
+      ws.on('close', (event) => {
         if (activeSocket === ws) {
           this.wsConnections.delete(key);
         }
 
-        existingOnClose?.call(ws, event);
-
         if (scheduleRetry()) {
           return;
         }
-      };
+      });
     };
 
     connectAttempt(0);

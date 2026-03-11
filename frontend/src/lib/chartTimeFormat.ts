@@ -22,19 +22,19 @@ export function formatChartIntervalLabel(interval: string): string {
   const normalizedUnit = unit.toLowerCase();
 
   if (normalizedUnit === 'm') {
-    return `${amount}分钟`;
+    return `${amount}\u5206\u949f`;
   }
 
   if (normalizedUnit === 'h') {
-    return `${amount}小时`;
+    return `${amount}\u5c0f\u65f6`;
   }
 
   if (normalizedUnit === 'd') {
-    return `${amount}日`;
+    return `${amount}\u65e5`;
   }
 
   if (normalizedUnit === 'w') {
-    return `${amount}周`;
+    return `${amount}\u5468`;
   }
 
   return interval;
@@ -84,3 +84,4 @@ export function resolveTimestampFromChartTime(time: Time): number | null {
 function normalizeTimestamp(timestamp: number): number {
   return timestamp >= 1_000_000_000_000 ? timestamp : timestamp * 1000;
 }
+

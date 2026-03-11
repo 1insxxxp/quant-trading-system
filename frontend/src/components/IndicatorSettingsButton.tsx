@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import type { IndicatorId, IndicatorSettings } from '../types';
 
 interface IndicatorSettingsButtonProps {
   settings: IndicatorSettings;
   onToggle: (indicatorId: IndicatorId, enabled: boolean) => void;
+  iconOnly?: boolean;
+  triggerClassName?: string;
 }
 
 const INDICATOR_OPTIONS: Array<{ id: IndicatorId; label: string }> = [
-  { id: 'volume', label: '成交量' },
+  { id: 'volume', label: '\u6210\u4ea4\u91cf' },
   { id: 'ma5', label: 'MA5' },
   { id: 'ma10', label: 'MA10' },
   { id: 'ma20', label: 'MA20' },
@@ -16,27 +18,80 @@ const INDICATOR_OPTIONS: Array<{ id: IndicatorId; label: string }> = [
 export const IndicatorSettingsButton: React.FC<IndicatorSettingsButtonProps> = ({
   settings,
   onToggle,
+  iconOnly = false,
+  triggerClassName,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const buttonId = useId();
+  const panelId = useId();
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsOpen(false);
+      }
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
+
+  const triggerClass = [
+    'indicator-settings__trigger',
+    iconOnly ? 'indicator-settings__trigger--icon-only' : '',
+    triggerClassName ?? '',
+  ].filter(Boolean).join(' ');
 
   return (
-    <div className="indicator-settings">
+    <div ref={rootRef} className={`indicator-settings${isOpen ? ' indicator-settings--open' : ''}`}>
       <button
+        id={buttonId}
         type="button"
-        className="indicator-settings__trigger"
+        className={triggerClass}
         aria-haspopup="dialog"
+        aria-controls={panelId}
         aria-expanded={isOpen}
+        aria-label={'\u6307\u6807\u8bbe\u7f6e'}
+        title={'\u6307\u6807\u8bbe\u7f6e'}
         onClick={() => setIsOpen((value) => !value)}
       >
         <span className="indicator-settings__trigger-icon" aria-hidden="true">
-          ≋
+          <svg viewBox="0 0 20 20" className="indicator-settings__icon-svg">
+            <path d="M3 15H17" />
+            <path d="M6 11H14" />
+            <path d="M8 7H12" />
+            <circle cx="6" cy="15" r="1.2" />
+            <circle cx="14" cy="11" r="1.2" />
+            <circle cx="8" cy="7" r="1.2" />
+          </svg>
         </span>
-        <span>指标</span>
+        {!iconOnly ? <span>{'\u6307\u6807'}</span> : null}
       </button>
 
       {isOpen ? (
-        <div className="indicator-settings__panel" role="dialog" aria-label="指标设置">
-          <strong className="indicator-settings__title">指标显示</strong>
+        <div
+          id={panelId}
+          className="indicator-settings__panel"
+          role="dialog"
+          aria-labelledby={buttonId}
+        >
+          <strong className="indicator-settings__title">{'\u6307\u6807\u663e\u793a'}</strong>
           <div className="indicator-settings__options">
             {INDICATOR_OPTIONS.map((option) => (
               <label key={option.id} className="indicator-settings__option">
@@ -54,3 +109,4 @@ export const IndicatorSettingsButton: React.FC<IndicatorSettingsButtonProps> = (
     </div>
   );
 };
+

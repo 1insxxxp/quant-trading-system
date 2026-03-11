@@ -1,12 +1,37 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useUiStore } from '../stores/uiStore';
+import type { SymbolOption } from '../types';
 
 const mockMarketState = {
   isConnected: true,
   exchange: 'binance',
   symbol: 'ETHUSDT',
+  symbols: [
+    { value: 'BTCUSDT', label: 'BTC/USDT', baseAsset: 'BTC', quoteAsset: 'USDT' },
+    { value: 'ETHUSDT', label: 'ETH/USDT', baseAsset: 'ETH', quoteAsset: 'USDT' },
+  ] as SymbolOption[],
+  isLoadingSymbols: false,
+  setExchange: vi.fn(),
+  setSymbol: vi.fn(),
+  fetchSymbols: vi.fn(async () => undefined),
   latestPrice: 2019.27,
+  klines: [
+    {
+      exchange: 'binance',
+      symbol: 'ETHUSDT',
+      interval: '1h',
+      open_time: 1,
+      close_time: 2,
+      open: 2000,
+      high: 2025,
+      low: 1995,
+      close: 2019.27,
+      volume: 20,
+      quote_volume: 40385.4,
+      is_closed: 0,
+    },
+  ],
 };
 
 vi.mock('../stores/marketStore', () => ({
@@ -31,6 +56,15 @@ describe('SystemTopbar', () => {
     mockMarketState.exchange = 'binance';
     mockMarketState.symbol = 'ETHUSDT';
     mockMarketState.latestPrice = 2019.27;
+    mockMarketState.symbols = [
+      { value: 'BTCUSDT', label: 'BTC/USDT', baseAsset: 'BTC', quoteAsset: 'USDT' },
+      { value: 'ETHUSDT', label: 'ETH/USDT', baseAsset: 'ETH', quoteAsset: 'USDT' },
+    ];
+    mockMarketState.isLoadingSymbols = false;
+    mockMarketState.setExchange.mockReset();
+    mockMarketState.setSymbol.mockReset();
+    mockMarketState.fetchSymbols.mockReset();
+    mockMarketState.fetchSymbols.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -40,19 +74,25 @@ describe('SystemTopbar', () => {
   it('renders a compact utility strip around the live market readout', () => {
     const markup = renderToStaticMarkup(<SystemTopbar />);
 
-    expect(markup).toContain('实时行情');
+    expect(markup).toContain('\u5b9e\u65f6\u884c\u60c5');
     expect(markup).toContain('$2,019.27');
     expect(markup).toContain('ETH/USDT');
     expect(markup).toContain('BINANCE');
-    expect(markup).toContain('收起侧边栏');
-    expect(markup).toContain('aria-label="连接在线"');
+    expect(markup).toContain('\u6536\u8d77\u4fa7\u8fb9\u680f');
+    expect(markup).toContain('aria-label="\u8fde\u63a5\u5728\u7ebf"');
     expect(markup).toContain('signal-light');
-    expect(markup).toContain('系统时间');
+    expect(markup).toContain('\u7cfb\u7edf\u65f6\u95f4');
     expect(markup).toContain('2026-03-09 23:16:17');
-    expect(markup).toContain('aria-label="切换到亮色主题"');
+    expect(markup).toContain('aria-label="\u5207\u6362\u5230\u4eae\u8272\u4e3b\u9898"');
     expect(markup).toContain('system-topbar__utilities');
+    expect(markup).toContain('system-topbar__utility-strip');
+    expect(markup).toContain('system-topbar__status-dot');
+    expect(markup).toContain('rolling-digits--clock');
+    expect(markup).toContain('topbar-market-controls');
+    expect(markup).toContain('data-testid="topbar-exchange-select-trigger"');
+    expect(markup).toContain('data-testid="topbar-symbol-select-trigger"');
+    expect(markup).not.toContain('\\u');
     expect(markup).not.toContain('Quant Trade System mark');
-    expect(markup).not.toContain('后台工作台');
     expect(markup).not.toContain('system-topbar__brand-mark');
   });
 });

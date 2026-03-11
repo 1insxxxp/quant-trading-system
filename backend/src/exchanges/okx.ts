@@ -22,6 +22,7 @@ export class OKXAdapter implements ExchangeAdapter {
   private readonly baseUrl = 'https://www.okx.com';
   private readonly wsUrl = 'wss://ws.okx.com:8443/ws/v5/public';
   private readonly requestTimeoutMs = Number(process.env.EXCHANGE_REQUEST_TIMEOUT_MS ?? 2500);
+  private readonly wsHandshakeTimeoutMs = Number(process.env.EXCHANGE_WS_HANDSHAKE_TIMEOUT_MS ?? 10000);
   private readonly transportConfig: ExchangeTransportConfig;
   private readonly httpGet: HttpGet;
   private readonly WebSocketCtor: WebSocketCtor;
@@ -100,16 +101,16 @@ export class OKXAdapter implements ExchangeAdapter {
     return this.openWebSocketWithFallback(this.wsUrl, key, 'trade', (ws) => {
       const pingInterval = this.attachPing(ws);
 
-      ws.onopen = () => {
+      ws.on('open', () => {
         ws.send(JSON.stringify({
           op: 'subscribe',
           args: [{ channel: 'trades', instId }],
         }));
-      };
+      });
 
-      ws.onmessage = (event) => {
+      ws.on('message', (payload) => {
         try {
-          const data = JSON.parse(event.data.toString());
+          const data = JSON.parse(payload.toString());
           if (data.event === 'pong' || !(data.arg?.channel === 'trades')) {
             return;
           }
@@ -133,11 +134,11 @@ export class OKXAdapter implements ExchangeAdapter {
         } catch (error: any) {
           console.error('OKX trade parse error:', error.message);
         }
-      };
+      });
 
-      ws.onclose = () => {
+      ws.on('close', () => {
         clearInterval(pingInterval);
-      };
+      });
     });
   }
 
@@ -152,16 +153,16 @@ export class OKXAdapter implements ExchangeAdapter {
     return this.openWebSocketWithFallback(this.wsUrl, key, 'kline', (ws) => {
       const pingInterval = this.attachPing(ws);
 
-      ws.onopen = () => {
+      ws.on('open', () => {
         ws.send(JSON.stringify({
           op: 'subscribe',
           args: [{ channel, instId }],
         }));
-      };
+      });
 
-      ws.onmessage = (event) => {
+      ws.on('message', (payload) => {
         try {
-          const data = JSON.parse(event.data.toString());
+          const data = JSON.parse(payload.toString());
           if (data.event === 'pong' || !data.arg?.channel?.startsWith('candle')) {
             return;
           }
@@ -191,11 +192,11 @@ export class OKXAdapter implements ExchangeAdapter {
         } catch (error: any) {
           console.error('OKX kline parse error:', error.message);
         }
-      };
+      });
 
-      ws.onclose = () => {
+      ws.on('close', () => {
         clearInterval(pingInterval);
-      };
+      });
     });
   }
 
@@ -270,11 +271,8 @@ export class OKXAdapter implements ExchangeAdapter {
       let retryScheduled = false;
       const ws = new this.WebSocketCtor(url, {
         agent: attempt.agent,
-        handshakeTimeout: this.requestTimeoutMs,
+        handshakeTimeout: this.wsHandshakeTimeoutMs,
       }) as WebSocket;
-      const existingOnOpen = ws.onopen;
-      const existingOnClose = ws.onclose;
-      const existingOnError = ws.onerror;
 
       activeSocket = ws;
       this.wsConnections.set(key, ws);
@@ -291,12 +289,11 @@ export class OKXAdapter implements ExchangeAdapter {
         return true;
       };
 
-      ws.onopen = (event) => {
+      ws.once('open', (event) => {
         opened = true;
-        existingOnOpen?.call(ws, event);
-      };
+      });
 
-      ws.onerror = (error) => {
+      ws.on('error', (error) => {
         if (scheduleRetry()) {
           safeCloseWebSocket(ws);
           return;
@@ -306,21 +303,18 @@ export class OKXAdapter implements ExchangeAdapter {
           return;
         }
 
-        existingOnError?.call(ws, error);
         console.error(`OKX ${label} WebSocket error via ${attempt.kind}:`, error);
-      };
+      });
 
-      ws.onclose = (event) => {
+      ws.on('close', (event) => {
         if (activeSocket === ws) {
           this.wsConnections.delete(key);
         }
 
-        existingOnClose?.call(ws, event);
-
         if (scheduleRetry()) {
           return;
         }
-      };
+      });
     };
 
     connectAttempt(0);
