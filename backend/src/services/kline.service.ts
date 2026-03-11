@@ -1,3 +1,4 @@
+import { redisCache } from '../cache/redis.js';
 import { db } from '../database/postgres.js';
 import { BinanceAdapter } from '../exchanges/binance.js';
 import { OKXAdapter } from '../exchanges/okx.js';
@@ -36,6 +37,15 @@ export class KlineService {
     const requestLimit = limit + 1;
     let syncState: Awaited<ReturnType<typeof db.getKlineSyncState>> | null = null;
     let cached: Kline[] = [];
+
+    const redisKlines = await redisCache.getKlines(exchange, symbol, interval, requestLimit);
+    if (redisKlines && redisKlines.length >= requestLimit) {
+      return {
+        klines: redisKlines.slice(-limit),
+        source: 'cache',
+        hasMore: true,
+      };
+    }
 
     try {
       syncState = await db.getKlineSyncState(exchange, symbol, interval);
@@ -78,6 +88,7 @@ export class KlineService {
       if (remoteKlines.length > 0) {
         try {
           await this.saveKlines(remoteKlines);
+          await redisCache.setKlines(exchange, symbol, interval, mergedKlines);
           await syncStateService.recordHistorySyncSuccess(
             exchange,
             symbol,

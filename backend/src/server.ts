@@ -1,6 +1,7 @@
 import './config/load-env.js';
 import cors from 'cors';
 import express from 'express';
+import { redisCache } from './cache/redis.js';
 import { db } from './database/postgres.js';
 import { BinanceAdapter } from './exchanges/binance.js';
 import { OKXAdapter } from './exchanges/okx.js';
@@ -169,7 +170,7 @@ async function initExchangeData() {
   console.log('Initializing exchange metadata and warm cache...');
 
   try {
-    await db.ready();
+    await Promise.all([db.ready(), redisCache.connect()]);
 
     const binanceAdapter = new BinanceAdapter();
     try {

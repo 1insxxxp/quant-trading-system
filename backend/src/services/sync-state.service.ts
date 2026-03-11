@@ -95,6 +95,24 @@ export class SyncStateService {
       last_realtime_error: formatSyncError(error),
     });
   }
+
+  async batchRecordRealtimeSync(klines: Kline[]): Promise<void> {
+    if (klines.length === 0) return;
+
+    const grouped = new Map<string, Kline[]>();
+    for (const kline of klines) {
+      const key = `${kline.exchange}:${kline.symbol}:${kline.interval}`;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key)!.push(kline);
+    }
+
+    await Promise.all(
+      Array.from(grouped.entries()).map(async ([_, groupKlines]) => {
+        const latest = groupKlines[groupKlines.length - 1];
+        await this.recordRealtimeSyncSuccess(latest);
+      }),
+    );
+  }
 }
 
 export const syncStateService = new SyncStateService();

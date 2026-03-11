@@ -285,7 +285,8 @@ export class OKXAdapter implements ExchangeAdapter {
 
         retryScheduled = true;
         this.wsConnections.delete(key);
-        queueMicrotask(() => connectAttempt(attemptIndex + 1));
+        const delay = Math.min(1000 * Math.pow(2, attemptIndex), 30000);
+        setTimeout(() => connectAttempt(attemptIndex + 1), delay);
         return true;
       };
 

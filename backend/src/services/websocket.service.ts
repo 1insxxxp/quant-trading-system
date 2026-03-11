@@ -237,17 +237,11 @@ export class WebSocketService {
   }
 
   private async persistRealtimeKlines(klines: Kline[]) {
-    if (klines.length === 0) {
-      return;
-    }
+    if (klines.length === 0) return;
 
     try {
       await klineService.saveKlines(klines);
-      await Promise.all(
-        klines.map(async (kline) => {
-          await syncStateService.recordRealtimeSyncSuccess(kline);
-        }),
-      );
+      await syncStateService.batchRecordRealtimeSync(klines);
     } catch (error) {
       console.error('Failed to persist realtime kline batch:', error);
       await Promise.all(
