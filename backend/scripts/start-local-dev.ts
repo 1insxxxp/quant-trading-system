@@ -26,6 +26,12 @@ type TunnelHandle = {
   close: () => Promise<void>;
 };
 
+type ManagedTunnelState = {
+  activeConnection: Client | null;
+  closed: boolean;
+  reconnectTimer: NodeJS.Timeout | null;
+};
+
 function spawnNpmCommand(
   cwd: string,
   args: string[],
@@ -94,9 +100,20 @@ async function ensureTunnel(): Promise<TunnelHandle | null> {
     throw new Error(getTunnelHealthErrorMessage(config.tunnel.localPort));
   }
 
-  const conn = new Client();
+  const state: ManagedTunnelState = {
+    activeConnection: null,
+    closed: false,
+    reconnectTimer: null,
+  };
   const server = net.createServer((socket) => {
-    conn.forwardOut(
+    const connection = state.activeConnection;
+
+    if (!connection) {
+      socket.destroy(new Error('DB tunnel is reconnecting'));
+      return;
+    }
+
+    connection.forwardOut(
       socket.remoteAddress || '127.0.0.1',
       socket.remotePort || 0,
       config.tunnel.remoteHost,
@@ -114,38 +131,128 @@ async function ensureTunnel(): Promise<TunnelHandle | null> {
     );
   });
 
-  await new Promise<void>((resolve, reject) => {
-    conn
-      .once('ready', () => {
-        server.listen(config.tunnel.localPort, '127.0.0.1', () => {
-          console.log(
-            `[local-dev] DB tunnel ready on 127.0.0.1:${config.tunnel.localPort} -> ${config.tunnel.remoteHost}:${config.tunnel.remotePort} via ${config.tunnel.sshHost}:${config.tunnel.sshPort}`,
-          );
-          resolve();
-        });
-      })
-      .once('error', reject)
-      .connect(buildSshConfig());
-  });
+  let serverListening = false;
 
-  const databaseReady = await waitForDatabaseReady(
-    '127.0.0.1',
-    config.tunnel.localPort,
-    3000,
-  );
+  const connectTunnel = async (isReconnect: boolean): Promise<void> => {
+    const conn = new Client();
 
-  if (!databaseReady) {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    conn.end();
-    throw new Error(
-      `DB tunnel opened on 127.0.0.1:${config.tunnel.localPort}, but PostgreSQL did not become ready.`,
-    );
-  }
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let reconnectScheduled = false;
+
+      const scheduleReconnect = () => {
+        if (reconnectScheduled || state.closed) {
+          return;
+        }
+
+        reconnectScheduled = true;
+        state.activeConnection = null;
+
+        if (state.reconnectTimer) {
+          clearTimeout(state.reconnectTimer);
+        }
+
+        state.reconnectTimer = setTimeout(() => {
+          state.reconnectTimer = null;
+          void connectTunnel(true).catch((error) => {
+            console.error('[local-dev] DB tunnel reconnect failed');
+            console.error(error);
+          });
+        }, 1000);
+      };
+
+      conn
+        .once('ready', () => {
+          state.activeConnection = conn;
+
+          const onReady = async () => {
+            const databaseReady = await waitForDatabaseReady(
+              '127.0.0.1',
+              config.tunnel.localPort,
+              3000,
+            );
+
+            if (!databaseReady) {
+              conn.end();
+              const error = new Error(
+                `DB tunnel opened on 127.0.0.1:${config.tunnel.localPort}, but PostgreSQL did not become ready.`,
+              );
+
+              if (!settled) {
+                settled = true;
+                reject(error);
+              } else {
+                console.error('[local-dev] DB tunnel lost PostgreSQL readiness after reconnect');
+                console.error(error);
+                scheduleReconnect();
+              }
+
+              return;
+            }
+
+            if (!isReconnect) {
+              console.log(
+                `[local-dev] DB tunnel ready on 127.0.0.1:${config.tunnel.localPort} -> ${config.tunnel.remoteHost}:${config.tunnel.remotePort} via ${config.tunnel.sshHost}:${config.tunnel.sshPort}`,
+              );
+            } else {
+              console.log(
+                `[local-dev] DB tunnel reconnected on 127.0.0.1:${config.tunnel.localPort}`,
+              );
+            }
+
+            if (!settled) {
+              settled = true;
+              resolve();
+            }
+          };
+
+          if (!serverListening) {
+            server.listen(config.tunnel.localPort, '127.0.0.1', () => {
+              serverListening = true;
+              void onReady();
+            });
+            return;
+          }
+
+          void onReady();
+        })
+        .on('error', (error) => {
+          if (!settled) {
+            settled = true;
+            reject(error);
+            return;
+          }
+
+          console.error('[local-dev] DB tunnel SSH client error');
+          console.error(error);
+        })
+        .on('close', () => {
+          if (state.activeConnection === conn) {
+            state.activeConnection = null;
+          }
+
+          if (!state.closed) {
+            console.warn('[local-dev] DB tunnel disconnected, retrying...');
+            scheduleReconnect();
+          }
+        })
+        .connect(buildSshConfig());
+    });
+  };
+
+  await connectTunnel(false);
 
   return {
     close: async () => {
+      state.closed = true;
+
+      if (state.reconnectTimer) {
+        clearTimeout(state.reconnectTimer);
+        state.reconnectTimer = null;
+      }
+
       await new Promise<void>((resolve) => server.close(() => resolve()));
-      conn.end();
+      state.activeConnection?.end();
     },
   };
 }
