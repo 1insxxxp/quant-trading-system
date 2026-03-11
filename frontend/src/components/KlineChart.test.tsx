@@ -112,7 +112,7 @@ describe('KlineChart', () => {
 
     const markup = renderToStaticMarkup(<KlineChart />);
 
-    expect(markup).toContain('成交量 (Volume)');
+    expect(markup).toContain('成交量(Volume)');
     expect(markup).toContain('MA5');
     expect(markup).not.toContain('MA10');
     expect(markup).not.toContain('MA20');
