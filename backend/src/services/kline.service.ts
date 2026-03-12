@@ -5,7 +5,7 @@ import { OKXAdapter } from '../exchanges/okx.js';
 import type { ExchangeAdapter, Kline, KlineQueryResult } from '../types/index.js';
 import { syncStateService } from './sync-state.service.js';
 
-const DEFAULT_INITIAL_KLINE_LIMIT = 2000;
+const DEFAULT_INITIAL_KLINE_LIMIT = 500;
 const DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
 
 const INTERVAL_MS: Record<string, number> = {
@@ -65,8 +65,6 @@ export class KlineService {
       };
     }
 
-    console.log(`Cache miss for ${exchange}:${symbol}:${interval} (${cached.length}/${limit})`);
-
     try {
       const adapter = this.adapters.get(exchange);
 
@@ -96,7 +94,7 @@ export class KlineService {
             interval,
             mergedKlines,
             hasMore,
-            exchange,
+            'remote',
           );
         } catch (persistError: any) {
           console.warn(`Persist remote klines skipped: ${persistError.message}`);
@@ -115,7 +113,7 @@ export class KlineService {
           interval,
           cached,
           false,
-          exchange,
+          'cache',
         );
       } catch (persistError: any) {
         console.warn(`Persist sync state skipped: ${persistError.message}`);

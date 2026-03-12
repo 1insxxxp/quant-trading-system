@@ -24,16 +24,9 @@ import {
   shouldLoadOlderKlines,
 } from './klineChartData';
 import { buildIndicatorLegend, syncIndicatorSeries } from './klineChartIndicators';
-import {
-  buildChartViewStateKey,
-  canRestoreChartVisibleRange,
-  readChartVisibleRange,
-  writeChartVisibleRange,
-} from '../lib/chartViewState';
 import type { Kline } from '../types';
 
 const MIN_CHART_HEIGHT = 460;
-const MIN_RESTORED_VISIBLE_BARS = 24;
 const MIN_DEFAULT_VISIBLE_BARS = 80;
 const DEFAULT_RIGHT_PADDING_BARS = 6;
 const LOADING_SIGNAL_BARS = Array.from({ length: 12 }, (_, index) => index);
@@ -52,6 +45,7 @@ export const KlineChart: React.FC = () => {
   const historyPagingArmFrameRef = useRef<number | null>(null);
   const [hoveredKline, setHoveredKline] = useState<Kline | null>(null);
   const theme = useUiStore((state) => state.theme);
+  const isCrosshairMagnetEnabled = useUiStore((state) => state.isCrosshairMagnetEnabled);
 
   const {
     klines,
@@ -72,14 +66,15 @@ export const KlineChart: React.FC = () => {
     }
 
     const initialTheme = getChartTheme(theme);
-    const initialHeight = Math.max(chartContainerRef.current.clientHeight, MIN_CHART_HEIGHT);
+    const containerHeight = chartContainerRef.current.clientHeight;
+    const initialHeight = containerHeight > 0 ? containerHeight : MIN_CHART_HEIGHT;
     const chart = createChart(chartContainerRef.current, {
-      width: chartContainerRef.current.clientWidth,
+      width: chartContainerRef.current.clientWidth || 800,
       height: initialHeight,
       layout: initialTheme.layout,
       grid: initialTheme.grid,
       crosshair: {
-        mode: 1,
+        mode: isCrosshairMagnetEnabled ? 1 : 0,
         vertLine: {
           color: initialTheme.crosshairColor,
         },
@@ -147,6 +142,8 @@ export const KlineChart: React.FC = () => {
     ma10SeriesRef.current = ma10Series;
     ma20SeriesRef.current = ma20Series;
     previousDataRef.current = [];
+    previousMarketKeyRef.current = null;
+    isHistoryPagingReadyRef.current = false;
 
     const resizeChart = () => {
       if (chartContainerRef.current) {
@@ -167,40 +164,24 @@ export const KlineChart: React.FC = () => {
     window.addEventListener('resize', resizeChart);
 
     const handleVisibleRangeChange = (range: { from: number; to: number } | null) => {
-      if (
-        shouldLoadOlderKlines({
-          visibleFrom: range?.from,
-          isLoadingOlderKlines: useMarketStore.getState().isLoadingOlderKlines,
-          hasMoreHistoricalKlines: useMarketStore.getState().hasMoreHistoricalKlines,
-          isHistoryPagingReady: isHistoryPagingReadyRef.current,
-          hasOlderLoadError: Boolean(useMarketStore.getState().olderKlineLoadError),
-        })
-      ) {
-        void useMarketStore.getState().loadOlderKlines();
+      const state = useMarketStore.getState();
+      const shouldLoad = shouldLoadOlderKlines({
+        visibleFrom: range?.from,
+        isLoadingOlderKlines: state.isLoadingOlderKlines,
+        hasMoreHistoricalKlines: state.hasMoreHistoricalKlines,
+        isHistoryPagingReady: isHistoryPagingReadyRef.current,
+        hasOlderLoadError: Boolean(state.olderKlineLoadError),
+      });
+
+      if (shouldLoad) {
+        void state.loadOlderKlines();
       }
     };
 
     const handleVisibleTimeRangeChange = (
       range: { from: Time; to: Time } | null,
     ) => {
-      const chartVisibleRange = normalizeChartVisibleRange(range);
-
-      if (!chartVisibleRange) {
-        return;
-      }
-
-      const state = useMarketStore.getState();
-      const viewStateKey = buildChartViewStateKey(state.exchange, state.symbol, state.interval);
-
-      if (
-        state.klines.length < MIN_DEFAULT_VISIBLE_BARS ||
-        !hasUsableRestoredRange(chartVisibleRange, state.interval)
-      ) {
-        writeChartVisibleRange(viewStateKey, null);
-        return;
-      }
-
-      writeChartVisibleRange(viewStateKey, chartVisibleRange);
+      // Chart view state persistence removed
     };
 
     const handleCrosshairMove = (param: MouseEventParams<Time>) => {
@@ -225,6 +206,7 @@ export const KlineChart: React.FC = () => {
       }
       isHistoryPagingReadyRef.current = false;
       previousDataRef.current = [];
+      previousMarketKeyRef.current = null;
       chart.remove();
     };
   }, []);
@@ -236,7 +218,7 @@ export const KlineChart: React.FC = () => {
       layout: nextTheme.layout,
       grid: nextTheme.grid,
       crosshair: {
-        mode: 1,
+        mode: isCrosshairMagnetEnabled ? 1 : 0,
         vertLine: {
           color: nextTheme.crosshairColor,
         },
@@ -261,7 +243,7 @@ export const KlineChart: React.FC = () => {
     ma5SeriesRef.current?.applyOptions({ color: nextTheme.ma5Color });
     ma10SeriesRef.current?.applyOptions({ color: nextTheme.ma10Color });
     ma20SeriesRef.current?.applyOptions({ color: nextTheme.ma20Color });
-  }, [theme]);
+  }, [theme, isCrosshairMagnetEnabled]);
 
   useEffect(() => {
     if (!candleSeriesRef.current) {
@@ -271,31 +253,28 @@ export const KlineChart: React.FC = () => {
     const marketKey = `${exchange}:${symbol}:${interval}`;
 
     if (klines.length === 0) {
-      candleSeriesRef.current.setData([]);
-      syncIndicatorSeries({
-        klines: [],
-        settings: indicatorSettings,
-        series: {
-          volume: volumeSeriesRef.current,
-          ma5: ma5SeriesRef.current,
-          ma10: ma10SeriesRef.current,
-          ma20: ma20SeriesRef.current,
-        },
-      });
-      previousDataRef.current = [];
-      previousMarketKeyRef.current = marketKey;
+      // Do not clear chart data when klines is empty - this causes flickering
+      // Just skip update and wait for data to arrive
       return;
     }
 
     const data = buildCandlestickData(klines, interval);
     const previousData = previousDataRef.current;
     const nextLast = data[data.length - 1];
-    const updateMode = resolveChartUpdateMode({
-      previousData,
-      nextData: data,
-      previousMarketKey: previousMarketKeyRef.current,
-      nextMarketKey: marketKey,
-    });
+
+    // Force replace mode on initial load, market change, or when data size grows significantly
+    const isInitialLoad = previousData.length === 0;
+    const isMarketChange = previousMarketKeyRef.current !== marketKey;
+    const isDataGrowth = data.length > previousData.length * 1.5;
+
+    const updateMode = isInitialLoad || isMarketChange || isDataGrowth
+      ? 'replace'
+      : resolveChartUpdateMode({
+          previousData,
+          nextData: data,
+          previousMarketKey: previousMarketKeyRef.current,
+          nextMarketKey: marketKey,
+        });
 
     if (updateMode === 'replace') {
       isHistoryPagingReadyRef.current = false;
@@ -304,35 +283,19 @@ export const KlineChart: React.FC = () => {
       }
 
       candleSeriesRef.current.setData(data);
-      const firstTime = normalizeChartTimeValue(data[0]?.time);
-      const lastTime = normalizeChartTimeValue(nextLast?.time);
-      const storedVisibleRange = readChartVisibleRange(
-        buildChartViewStateKey(exchange, symbol, interval),
-      );
 
-      if (
-        chartRef.current &&
-        firstTime !== null &&
-        lastTime !== null &&
-        storedVisibleRange !== null &&
-        canRestoreChartVisibleRange(storedVisibleRange, {
-          firstTime,
-          lastTime,
-        }) &&
-        hasUsableRestoredRange(storedVisibleRange, interval)
-      ) {
-        chartRef.current.timeScale().setVisibleRange({
-          from: storedVisibleRange.from as Time,
-          to: storedVisibleRange.to as Time,
-        });
-      } else {
-        applyDefaultVisibleRange(chartRef.current, data.length);
-      }
+      // Force chart to show correct number of bars
+      chartRef.current?.timeScale().fitContent();
 
-      historyPagingArmFrameRef.current = window.requestAnimationFrame(() => {
-        isHistoryPagingReadyRef.current = true;
-        historyPagingArmFrameRef.current = null;
+      // Set explicit visible range to show the latest bars
+      const visibleBars = Math.min(data.length, MIN_DEFAULT_VISIBLE_BARS);
+      const startIndex = Math.max(0, data.length - visibleBars);
+      chartRef.current?.timeScale().setVisibleLogicalRange({
+        from: startIndex,
+        to: data.length - 1 + DEFAULT_RIGHT_PADDING_BARS,
       });
+
+      isHistoryPagingReadyRef.current = true;
     } else if (updateMode === 'prepend') {
       const visibleRange = chartRef.current?.timeScale().getVisibleLogicalRange();
       const prependedCount = data.length - previousData.length;
@@ -365,12 +328,25 @@ export const KlineChart: React.FC = () => {
           to: visibleRange.to + Math.max(0, addedCount),
         });
       }
-    } else if (nextLast) {
+    } else if (updateMode === 'update-last' && nextLast) {
       candleSeriesRef.current.update(nextLast);
-
-      if (updateMode === 'append') {
-        chartRef.current?.timeScale().scrollToRealTime();
+      // Ensure visible range is set correctly when chart might be zoomed in too far
+      const visibleRange = chartRef.current?.timeScale().getVisibleLogicalRange();
+      if (visibleRange) {
+        const rangeWidth = visibleRange.to - visibleRange.from;
+        // If visible range is too narrow (showing only a few bars), reset it
+        if (rangeWidth < 10) {
+          const visibleBars = Math.min(data.length, MIN_DEFAULT_VISIBLE_BARS);
+          const startIndex = Math.max(0, data.length - visibleBars);
+          chartRef.current?.timeScale().setVisibleLogicalRange({
+            from: startIndex,
+            to: data.length - 1 + DEFAULT_RIGHT_PADDING_BARS,
+          });
+        }
       }
+    } else if (updateMode === 'append' && nextLast) {
+      candleSeriesRef.current.update(nextLast);
+      chartRef.current?.timeScale().scrollToRealTime();
     }
 
     syncIndicatorSeries({
@@ -573,73 +549,17 @@ function resolveKlineFromCrosshair(params: {
   return klines.find((item) => item.open_time === hoveredTimestamp) ?? klines[klines.length - 1] ?? null;
 }
 
-function normalizeChartVisibleRange(
-  range: { from: Time; to: Time } | null,
-) {
-  if (!range) {
-    return null;
-  }
-
-  const from = normalizeChartTimeValue(range.from);
-  const to = normalizeChartTimeValue(range.to);
-
-  if (from === null || to === null || from >= to) {
-    return null;
-  }
-
-  return { from, to };
-}
-
-function normalizeChartTimeValue(time: Time | undefined): number | null {
-  return typeof time === 'number' && Number.isFinite(time) ? time : null;
-}
-
-function hasUsableRestoredRange(
-  range: { from: number; to: number },
-  interval: string,
-): boolean {
-  const intervalSeconds = resolveIntervalSeconds(interval);
-  const spanSeconds = range.to - range.from;
-
-  if (!Number.isFinite(spanSeconds) || spanSeconds <= 0) {
-    return false;
-  }
-
-  return spanSeconds / intervalSeconds >= MIN_RESTORED_VISIBLE_BARS;
-}
-
-function resolveIntervalSeconds(interval: string): number {
-  switch (interval) {
-    case '1m':
-      return 60;
-    case '5m':
-      return 5 * 60;
-    case '15m':
-      return 15 * 60;
-    case '1h':
-      return 60 * 60;
-    case '4h':
-      return 4 * 60 * 60;
-    case '1d':
-      return 24 * 60 * 60;
-    default:
-      return 60 * 60;
-  }
-}
-
-function applyDefaultVisibleRange(chart: IChartApi | null, barCount: number) {
-  if (!chart) {
+function applyDefaultVisibleRange(chart: IChartApi | null, data: CandlestickData[], interval: string) {
+  if (!chart || data.length === 0) {
     return;
   }
 
-  if (barCount >= MIN_DEFAULT_VISIBLE_BARS) {
-    chart.timeScale().fitContent();
-    return;
-  }
+  const visibleBars = Math.min(data.length, MIN_DEFAULT_VISIBLE_BARS);
+  const startIndex = Math.max(0, data.length - visibleBars);
+  const endIndex = Math.max(startIndex, data.length - 1);
 
-  const lastIndex = Math.max(0, barCount - 1);
   chart.timeScale().setVisibleLogicalRange({
-    from: lastIndex - (MIN_DEFAULT_VISIBLE_BARS - 1),
-    to: lastIndex + DEFAULT_RIGHT_PADDING_BARS,
+    from: startIndex,
+    to: endIndex + DEFAULT_RIGHT_PADDING_BARS,
   });
 }

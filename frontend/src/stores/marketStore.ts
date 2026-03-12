@@ -30,8 +30,7 @@ const DEFAULT_MARKET_SELECTION = {
   interval: '1h',
 } as const;
 const INITIAL_KLINE_LIMIT = 500;
-const OLDER_KLINE_PAGE_SIZE = 1000;
-const INITIAL_TOP_UP_MAX_ROUNDS = 4;
+const OLDER_KLINE_PAGE_SIZE = 500;
 const DEFAULT_OLDER_KLINE_LOAD_ERROR = '加载历史K线失败，请重试。';
 
 interface BackendSymbol {
@@ -269,52 +268,9 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         return;
       }
 
-      let mergedKlines = normalizeKlines(initialResult.klines ?? []);
-      let hasMoreHistory = initialResult.hasMore ?? false;
-      let source = resolveKlineSource(initialResult.source, mergedKlines);
-      let beforeCursor = mergedKlines[0]?.open_time;
-
-      for (
-        let round = 0;
-        round < INITIAL_TOP_UP_MAX_ROUNDS &&
-        mergedKlines.length < INITIAL_KLINE_LIMIT &&
-        hasMoreHistory &&
-        typeof beforeCursor === 'number';
-        round += 1
-      ) {
-        const page = await fetchKlinePage({
-          exchange,
-          symbol,
-          interval,
-          limit: Math.min(OLDER_KLINE_PAGE_SIZE, INITIAL_KLINE_LIMIT - mergedKlines.length),
-          before: beforeCursor,
-        });
-
-        if (isStaleInitialRequest(fetchToken, marketKey, get)) {
-          return;
-        }
-
-        if (!page.success) {
-          break;
-        }
-
-        const older = normalizeKlines(page.klines ?? []);
-
-        if (older.length === 0) {
-          hasMoreHistory = false;
-          break;
-        }
-
-        mergedKlines = normalizeKlines([...older, ...mergedKlines]);
-        hasMoreHistory = page.hasMore ?? false;
-        beforeCursor = mergedKlines[0]?.open_time;
-
-        if (source !== 'remote') {
-          source = resolveKlineSource(page.source, mergedKlines);
-        }
-      }
-
-      const nextKlines = mergedKlines.slice(-INITIAL_KLINE_LIMIT);
+      const nextKlines = normalizeKlines(initialResult.klines ?? []);
+      const hasMoreHistory = initialResult.hasMore ?? false;
+      const source = resolveKlineSource(initialResult.source, nextKlines);
       set({
         klines: nextKlines,
         klineSource: source,
@@ -323,7 +279,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         isLoadingKlines: false,
         isLoadingOlderKlines: false,
         olderKlineLoadError: null,
-        hasMoreHistoricalKlines: hasMoreHistory || mergedKlines.length > INITIAL_KLINE_LIMIT,
+        hasMoreHistoricalKlines: hasMoreHistory,
       });
     } catch (error) {
       if (isStaleInitialRequest(fetchToken, marketKey, get)) {

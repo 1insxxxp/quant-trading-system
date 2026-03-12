@@ -5,9 +5,6 @@ import { getMarketKey, useMarketStore } from '../stores/marketStore';
 import type { Kline, PriceUpdate } from '../types/index';
 
 const FALLBACK_POLL_INTERVAL_MS = 1200;
-const SPARSE_HISTORY_THRESHOLD = 120;
-const SPARSE_HISTORY_POLL_LIMIT = 240;
-const REALTIME_POLL_LIMIT = 2;
 const PRICE_FALLBACK_INTERVAL = '1m';
 const PRICE_STALE_THRESHOLD_MS = 5_000;
 
@@ -16,15 +13,12 @@ export const useWebSocket = () => {
   const symbol = useMarketStore((state) => state.symbol);
   const interval = useMarketStore((state) => state.interval);
   const isConnected = useMarketStore((state) => state.isConnected);
-  const klineCount = useMarketStore((state) => state.klines.length);
   const lastPriceTimestamp = useMarketStore((state) => state.lastPriceTimestamp);
   const isLoadingKlines = useMarketStore((state) => state.isLoadingKlines);
-  const mergeKlines = useMarketStore((state) => state.mergeKlines);
   const updateKline = useMarketStore((state) => state.updateKline);
   const setLatestPrice = useMarketStore((state) => state.setLatestPrice);
   const setIsConnected = useMarketStore((state) => state.setIsConnected);
   const loadInitialKlines = useMarketStore((state) => state.loadInitialKlines);
-  const hasSparseHistory = klineCount < SPARSE_HISTORY_THRESHOLD;
   const hasStalePrice = (
     typeof lastPriceTimestamp !== 'number' ||
     Date.now() - lastPriceTimestamp > PRICE_STALE_THRESHOLD_MS
@@ -104,61 +98,20 @@ export const useWebSocket = () => {
     return () => {
       client.disconnect();
     };
-  }, [exchange, symbol, interval, loadInitialKlines, setIsConnected, setLatestPrice, updateKline]);
+  }, [exchange, symbol, interval]);
 
   useEffect(() => {
-    const shouldPollKline = !isLoadingKlines && (!isConnected || hasSparseHistory);
+    // Only poll for price when klines are loaded; avoid kline polling conflicting with initial load
     const shouldPollPrice = !isLoadingKlines && (!isConnected || hasStalePrice);
-    const shouldPoll = shouldPollKline || shouldPollPrice;
 
-    if (!shouldPoll) {
+    if (!shouldPollPrice) {
       return undefined;
     }
 
     let disposed = false;
     const abortController = new AbortController();
     const runSingleFlightPoll = createSingleFlightRunner();
-    const pollLimit = hasSparseHistory ? SPARSE_HISTORY_POLL_LIMIT : REALTIME_POLL_LIMIT;
     const marketKey = getMarketKey(exchange, symbol, interval);
-
-    const pollLatestKline = async () => {
-      try {
-        const response = await fetch(
-          `/quant/api/klines?exchange=${exchange}&symbol=${symbol}&interval=${interval}&limit=${pollLimit}`,
-          { signal: abortController.signal },
-        );
-        const payload = await response.json() as {
-          success?: boolean;
-          klines?: Kline[];
-        };
-
-        if (
-          disposed ||
-          abortController.signal.aborted ||
-          getMarketKey(useMarketStore.getState().exchange, useMarketStore.getState().symbol, useMarketStore.getState().interval) !== marketKey
-        ) {
-          return;
-        }
-
-        if (payload.success !== true || !Array.isArray(payload.klines) || payload.klines.length === 0) {
-          return;
-        }
-
-        const sorted = [...payload.klines].sort((left, right) => left.open_time - right.open_time);
-        mergeKlines(sorted);
-
-        const latest = sorted[sorted.length - 1];
-        if (latest) {
-          setLatestPrice(latest.close, latest.close_time ?? latest.open_time);
-        }
-      } catch (error) {
-        if (isAbortError(error)) {
-          return;
-        }
-
-        // Keep quiet when the backend is temporarily unavailable; websocket retry continues in parallel.
-      }
-    };
 
     const pollLatestPrice = async () => {
       try {
@@ -191,28 +144,12 @@ export const useWebSocket = () => {
         if (isAbortError(error)) {
           return;
         }
-
-        // Keep quiet when the backend is temporarily unavailable; websocket retry continues in parallel.
       }
     };
 
-    const pollAll = async () => {
-      const tasks: Promise<void>[] = [];
-
-      if (shouldPollKline) {
-        tasks.push(pollLatestKline());
-      }
-
-      if (shouldPollPrice) {
-        tasks.push(pollLatestPrice());
-      }
-
-      await Promise.all(tasks);
-    };
-
-    void runSingleFlightPoll(pollAll);
+    void runSingleFlightPoll(pollLatestPrice);
     const timer = window.setInterval(() => {
-      void runSingleFlightPoll(pollAll);
+      void runSingleFlightPoll(pollLatestPrice);
     }, FALLBACK_POLL_INTERVAL_MS);
 
     return () => {
@@ -220,7 +157,7 @@ export const useWebSocket = () => {
       abortController.abort();
       window.clearInterval(timer);
     };
-  }, [exchange, symbol, interval, isConnected, isLoadingKlines, hasSparseHistory, hasStalePrice, mergeKlines, setLatestPrice]);
+  }, [exchange, symbol, interval, isConnected, isLoadingKlines, hasStalePrice, setLatestPrice]);
 
   return null;
 };
