@@ -1468,13 +1468,8 @@ input[type='checkbox'] {
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
-  gap: 6px 10px;
+  gap: 8px;
   min-width: 0;
-  overflow-x: auto;
-}
-
-.chart-inspector__metrics::-webkit-scrollbar {
-  display: none;
 }
 
 .chart-inspector__empty {
@@ -2871,25 +2866,20 @@ body::after {
 }
 
 .chart-panel__hud--terminal .chart-inspector__metrics {
-  gap: 5px;
+  gap: 6px;
   flex-wrap: nowrap;
-  overflow-x: auto;
-}
-
-.chart-panel__hud--terminal .chart-inspector__metrics::-webkit-scrollbar {
-  display: none;
 }
 
 .chart-panel__hud--terminal .chart-inspector__metric {
-  padding: 0.22rem 0.42rem;
+  padding: 0.18rem 0.32rem;
 }
 
 .chart-panel__hud--terminal .chart-inspector__metric-label {
-  font-size: 0.62rem;
+  font-size: 0.6rem;
 }
 
 .chart-panel__hud--terminal .chart-inspector__metric-value {
-  font-size: 0.74rem;
+  font-size: 0.7rem;
 }
 
 .chart-panel__body {
