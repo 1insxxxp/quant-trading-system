@@ -416,13 +416,12 @@ export const KlineChart: React.FC = () => {
             ) : null}
 
             {isLoadingOlderKlines ? (
-              <div className="chart-history-status chart-history-status--loading" role="status" aria-live="polite">
-                <span className="chart-history-status__signal" aria-hidden="true">
+              <div className="chart-history-loading" role="status" aria-live="polite">
+                <span className="chart-history-loading__signal" aria-hidden="true">
                   {Array.from({ length: 6 }, (_, index) => (
-                    <span key={index} className="chart-history-status__signal-bar" />
+                    <span key={index} className="chart-history-loading__bar" />
                   ))}
                 </span>
-                <span>{'\u6b63\u5728\u52a0\u8f7d\u66f4\u65e9\u5386\u53f2 K \u7ebf...'}</span>
               </div>
             ) : null}
 
