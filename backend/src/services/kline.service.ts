@@ -7,6 +7,7 @@ import { syncStateService } from './sync-state.service.js';
 
 const DEFAULT_INITIAL_KLINE_LIMIT = 500;
 const DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
+const DB_QUERY_TIMEOUT_MS = 1000;
 
 const INTERVAL_MS: Record<string, number> = {
   '1m': 60 * 1000,
@@ -35,98 +36,132 @@ export class KlineService {
     before?: number,
   ): Promise<KlineQueryResult> {
     const requestLimit = limit + 1;
-    let syncState: Awaited<ReturnType<typeof db.getKlineSyncState>> | null = null;
-    let cached: Kline[] = [];
 
-    const redisKlines = await redisCache.getKlines(exchange, symbol, interval, requestLimit);
-    if (redisKlines && redisKlines.length >= requestLimit) {
-      return {
-        klines: redisKlines.slice(-limit),
-        source: 'cache',
-        hasMore: true,
-      };
-    }
-
-    try {
-      syncState = await db.getKlineSyncState(exchange, symbol, interval);
-      cached = normalizeKlines(
-        await db.getKlines(exchange, symbol, interval, requestLimit, before) as Kline[],
-      );
-    } catch (error: any) {
-      console.warn(`DB unavailable for klines ${exchange}:${symbol}:${interval}: ${error.message}`);
-    }
-
-    if (cached.length >= requestLimit) {
-      const persistedHasMore = syncState?.has_more_history ?? true;
-      return {
-        klines: cached.slice(-limit),
-        source: 'cache',
-        hasMore: persistedHasMore,
-      };
-    }
-
-    try {
-      const adapter = this.adapters.get(exchange);
-
-      if (!adapter) {
-        console.warn(`Missing exchange adapter: ${exchange}`);
-        return this.buildFallbackResult(cached, limit);
-      }
-
-      const remoteKlines = await this.fetchPagedRemoteKlines(
-        adapter,
-        symbol,
-        interval,
-        requestLimit,
-        before,
-      );
-      const mergedKlines = normalizeKlines([...cached, ...remoteKlines]);
-      const hasMore = remoteKlines.length >= requestLimit;
-      const responseKlines = mergedKlines.slice(-limit);
-
-      if (remoteKlines.length > 0) {
-        try {
-          await this.saveKlines(remoteKlines);
-          await redisCache.setKlines(exchange, symbol, interval, mergedKlines);
-          await syncStateService.recordHistorySyncSuccess(
-            exchange,
-            symbol,
-            interval,
-            mergedKlines,
-            hasMore,
-            'remote',
-          );
-        } catch (persistError: any) {
-          console.warn(`Persist remote klines skipped: ${persistError.message}`);
-        }
+    // 1. 无 before 参数时，先查 Redis（最新数据缓存）
+    if (before === undefined) {
+      const redisKlines = await redisCache.getKlines(exchange, symbol, interval, requestLimit);
+      if (redisKlines && redisKlines.length >= requestLimit) {
         return {
-          klines: responseKlines,
-          source: responseKlines.length === cached.length ? 'cache' : 'remote',
-          hasMore,
+          klines: redisKlines.slice(-limit),
+          source: 'cache',
+          hasMore: true,
         };
       }
+    }
 
-      try {
-        await syncStateService.recordHistorySyncSuccess(
+    // 2. 有 before 参数（历史数据加载）时，优先查 DB（预热数据已在库中）
+    const dbResult = await this.queryKlinesFromDb(exchange, symbol, interval, requestLimit, before);
+
+    if (dbResult && dbResult.length >= requestLimit) {
+      const syncState = await db.getKlineSyncState(exchange, symbol, interval).catch(() => null);
+      return {
+        klines: dbResult.slice(-limit),
+        source: 'cache',
+        hasMore: syncState?.has_more_history ?? true,
+      };
+    }
+
+    // 3. DB 查询不足或为空时，回退到 Remote 查询
+    const remoteResult = await this.queryKlinesFromRemote(exchange, symbol, interval, requestLimit, before);
+
+    if (remoteResult) {
+      const { klines: remoteKlines, hasMore } = remoteResult;
+      const mergedKlines = normalizeKlines([...(dbResult || []), ...remoteKlines]);
+
+      // 异步持久化，不阻塞返回
+      this.persistKlines(exchange, symbol, interval, remoteKlines, mergedKlines, hasMore).catch(() => {});
+
+      return {
+        klines: mergedKlines.slice(-limit),
+        source: 'remote',
+        hasMore,
+      };
+    }
+
+    // 4. 兜底：返回 DB 查询结果（即使不足）
+    if (dbResult && dbResult.length > 0) {
+      return {
+        klines: dbResult.slice(-limit),
+        source: 'cache',
+        hasMore: false,
+      };
+    }
+
+    return {
+      klines: [],
+      source: 'cache',
+      hasMore: false,
+    };
+  }
+
+  private async queryKlinesFromDb(
+    exchange: string,
+    symbol: string,
+    interval: string,
+    limit: number,
+    before?: number,
+  ): Promise<Kline[] | null> {
+    try {
+      const klines = normalizeKlines(
+        await db.getKlines(exchange, symbol, interval, limit, before) as Kline[],
+      );
+      return klines.length > 0 ? klines : null;
+    } catch (error: any) {
+      console.debug(`DB query failed for ${exchange}:${symbol}:${interval}: ${error.message}`);
+      return null;
+    }
+  }
+
+  private async queryKlinesFromRemote(
+    exchange: string,
+    symbol: string,
+    interval: string,
+    limit: number,
+    before?: number,
+  ): Promise<{ klines: Kline[]; hasMore: boolean } | null> {
+    try {
+      const adapter = this.adapters.get(exchange);
+      if (!adapter) {
+        console.warn(`Missing exchange adapter: ${exchange}`);
+        return null;
+      }
+
+      const remoteKlines = await this.fetchPagedRemoteKlines(adapter, symbol, interval, limit, before);
+      return {
+        klines: remoteKlines,
+        hasMore: remoteKlines.length >= limit,
+      };
+    } catch (error: any) {
+      console.error(`Remote query failed for ${exchange}:${symbol}:${interval}: ${error.message}`);
+      return null;
+    }
+  }
+
+  private async persistKlines(
+    exchange: string,
+    symbol: string,
+    interval: string,
+    newKlines: Kline[],
+    allKlines: Kline[],
+    hasMore: boolean,
+  ): Promise<void> {
+    if (newKlines.length === 0) return;
+
+    try {
+      await Promise.all([
+        this.saveKlines(newKlines),
+        redisCache.setKlines(exchange, symbol, interval, allKlines),
+        syncStateService.recordHistorySyncSuccess(
           exchange,
           symbol,
           interval,
-          cached,
-          false,
-          'cache',
-        );
-      } catch (persistError: any) {
-        console.warn(`Persist sync state skipped: ${persistError.message}`);
-      }
-      return this.buildFallbackResult(cached, limit, false);
+          allKlines,
+          hasMore,
+          'remote',
+        ),
+      ]);
     } catch (error: any) {
-      console.error('Failed to load remote klines:', error.message);
-      try {
-        await syncStateService.recordHistorySyncError(exchange, symbol, interval, error);
-      } catch (persistError: any) {
-        console.warn(`Persist sync error skipped: ${persistError.message}`);
-      }
-      return this.buildFallbackResult(cached, limit, syncState?.has_more_history ?? false);
+      console.warn(`Persist klines failed: ${error.message}`);
     }
   }
 

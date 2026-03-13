@@ -455,8 +455,6 @@ export const KlineChart: React.FC = () => {
                 <span key={barIndex} className="chart-loading-signal__bar" />
               ))}
             </div>
-            <strong>{'\u6b63\u5728\u52a0\u8f7d K \u7ebf\u6570\u636e...'}</strong>
-            <span>{'\u5207\u6362\u5df2\u751f\u6548\uff0c\u5386\u53f2\u6570\u636e\u8fd4\u56de\u540e\u4f1a\u81ea\u52a8\u66f4\u65b0\u5f53\u524d\u56fe\u8868\u3002'}</span>
           </div>
         ) : null}
 
