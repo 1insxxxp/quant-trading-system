@@ -1623,8 +1623,9 @@ input[type='checkbox'] {
 
 .chart-history-status {
   position: absolute;
-  top: 14px;
+  top: 50%;
   left: 14px;
+  transform: translateY(-50%);
   z-index: 3;
   display: inline-flex;
   align-items: center;
@@ -2662,8 +2663,9 @@ body::after {
 }
 
 .chart-history-status {
-  top: 12px;
+  top: 50%;
   left: 12px;
+  transform: translateY(-50%);
   padding: 0.34rem 0.66rem;
   font-size: 0.74rem;
   background: rgba(5, 18, 28, 0.86);
