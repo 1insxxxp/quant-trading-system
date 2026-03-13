@@ -224,13 +224,6 @@ describe('MarketTradeStream', () => {
         close: 103,
         is_closed: 1,
       }),
-      expect.objectContaining({
-        interval: '1m',
-        open_time: 180_000,
-        close: 103,
-        is_closed: 1,
-        volume: 0,
-      }),
     ]);
     expect(onEmitKline).toHaveBeenCalledWith(expect.objectContaining({
       interval: '1m',

@@ -4,7 +4,7 @@ import type { Kline } from '../types';
 export type ChartUpdateMode = 'replace' | 'update-last' | 'append' | 'prepend' | 'repair';
 const HISTORY_LOAD_EDGE_THRESHOLD = 50;
 
-export function buildCandlestickData(klines: Kline[], interval?: string): CandlestickData[] {
+export function buildCandlestickData(klines: Kline[]): CandlestickData[] {
   const deduped = new Map<number, Kline>();
 
   [...klines]

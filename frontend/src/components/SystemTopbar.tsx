@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { formatLivePrice, formatMarketSymbol } from '../lib/marketDisplay';
 import { useMarketStore } from '../stores/marketStore';
 import { useUiStore } from '../stores/uiStore';
@@ -10,18 +10,6 @@ const EXCHANGES = [
   { value: 'binance', label: 'Binance' },
   { value: 'okx', label: 'OKX' },
 ];
-
-function formatSystemTime(value: Date): string {
-  return new Intl.DateTimeFormat('sv-SE', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).format(value);
-}
 
 function resolvePriceTone(params: {
   latestPrice: number | null;

@@ -237,7 +237,6 @@ export class MarketTradeStream {
         );
         const repairedClosedKlines = buildRecoveredGapSequence({
           current: gap.current,
-          interval: gap.interval,
           nextTradeOpenTime: gap.nextTradeOpenTime,
           recoveredKlines,
         });
@@ -266,62 +265,15 @@ export class MarketTradeStream {
 
 function buildRecoveredGapSequence(params: {
   current: Kline;
-  interval: string;
   nextTradeOpenTime: number;
   recoveredKlines: Kline[];
 }): Kline[] {
-  const { current, interval, nextTradeOpenTime, recoveredKlines } = params;
-  const intervalMs = getIntervalMs(interval);
-  const recoveredByOpenTime = new Map<number, Kline>();
-  const repaired: Kline[] = [];
-  let previousClose = current.close;
-  let openTime = current.open_time + intervalMs;
-
-  recoveredKlines
+  const { current, nextTradeOpenTime, recoveredKlines } = params;
+  return recoveredKlines
     .filter((kline) => kline.open_time > current.open_time && kline.open_time < nextTradeOpenTime)
     .sort((left, right) => left.open_time - right.open_time)
-    .forEach((kline) => {
-      recoveredByOpenTime.set(kline.open_time, {
-        ...kline,
-        is_closed: 1,
-      });
-    });
-
-  while (openTime < nextTradeOpenTime) {
-    const recovered = recoveredByOpenTime.get(openTime);
-
-    if (recovered) {
-      repaired.push(recovered);
-      previousClose = recovered.close;
-    } else {
-      repaired.push(createFlatGapCandle(current, openTime, openTime + intervalMs - 1, previousClose));
-    }
-
-    openTime += intervalMs;
-  }
-
-  return repaired;
-}
-
-function createFlatGapCandle(
-  reference: Kline,
-  openTime: number,
-  closeTime: number,
-  close: number,
-): Kline {
-  return {
-    exchange: reference.exchange,
-    symbol: reference.symbol,
-    interval: reference.interval,
-    open_time: openTime,
-    close_time: closeTime,
-    open: close,
-    high: close,
-    low: close,
-    close,
-    volume: 0,
-    quote_volume: 0,
-    trades_count: 0,
-    is_closed: 1,
-  };
+    .map((kline) => ({
+      ...kline,
+      is_closed: 1,
+    }));
 }

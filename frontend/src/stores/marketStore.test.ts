@@ -60,7 +60,7 @@ describe('marketStore', () => {
     vi.restoreAllMocks();
   });
 
-  it('preserves the previous chart while the next market is loading', () => {
+  it('clears the previous chart while the next market is loading', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(() => new Promise(() => undefined)) as typeof fetch,
@@ -73,9 +73,100 @@ describe('marketStore', () => {
 
     useMarketStore.getState().setExchange('okx');
 
-    expect(useMarketStore.getState().klines).toEqual([makeKline()]);
+    expect(useMarketStore.getState().klines).toEqual([]);
+    expect(useMarketStore.getState().klineSource).toBe('empty');
     expect(useMarketStore.getState().latestPrice).toBeNull();
     expect(useMarketStore.getState().isLoadingKlines).toBe(true);
+  });
+
+  it('merges realtime klines that arrive while the initial chart request is still loading', async () => {
+    const response = deferred<Response>();
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => response.promise) as typeof fetch,
+    );
+
+    useMarketStore.setState({
+      exchange: 'binance',
+      symbol: 'ETHUSDT',
+      interval: '1m',
+      klines: [],
+      isLoadingKlines: false,
+    });
+
+    const fetchPromise = useMarketStore.getState().loadInitialKlines();
+
+    useMarketStore.getState().updateKline(
+      makeKline({
+        symbol: 'ETHUSDT',
+        interval: '1m',
+        open_time: 120,
+        close_time: 179,
+        open: 201,
+        high: 206,
+        low: 200,
+        close: 205,
+        volume: 22,
+        quote_volume: 4510,
+        is_closed: 0,
+      }),
+    );
+
+    response.resolve({
+      ok: true,
+      json: async () => ({
+        success: true,
+        source: 'remote',
+        klines: [
+          makeKline({
+            symbol: 'ETHUSDT',
+            interval: '1m',
+            open_time: 60,
+            close_time: 119,
+            close: 200,
+          }),
+          makeKline({
+            symbol: 'ETHUSDT',
+            interval: '1m',
+            open_time: 120,
+            close_time: 179,
+            open: 201,
+            high: 203,
+            low: 200,
+            close: 202,
+            volume: 10,
+            quote_volume: 2020,
+            is_closed: 0,
+          }),
+        ],
+      }),
+    } as Response);
+
+    await fetchPromise;
+
+    expect(useMarketStore.getState().klines).toEqual([
+      makeKline({
+        symbol: 'ETHUSDT',
+        interval: '1m',
+        open_time: 60,
+        close_time: 119,
+        close: 200,
+      }),
+      makeKline({
+        symbol: 'ETHUSDT',
+        interval: '1m',
+        open_time: 120,
+        close_time: 179,
+        open: 201,
+        high: 206,
+        low: 200,
+        close: 205,
+        volume: 22,
+        quote_volume: 4510,
+        is_closed: 0,
+      }),
+    ]);
   });
 
   it('ignores stale fetch responses after the active market changes', async () => {

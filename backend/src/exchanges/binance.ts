@@ -16,6 +16,8 @@ interface BinanceAdapterOptions {
   transportConfig?: ExchangeTransportConfig;
   httpGet?: HttpGet;
   WebSocketCtor?: WebSocketCtor;
+  wsReconnectDelayMs?: number;
+  wsIdleTimeoutMs?: number;
 }
 
 export class BinanceAdapter implements ExchangeAdapter {
@@ -23,6 +25,8 @@ export class BinanceAdapter implements ExchangeAdapter {
   private readonly wsUrl = 'wss://stream.binance.com:9443/ws';
   private readonly requestTimeoutMs = Number(process.env.EXCHANGE_REQUEST_TIMEOUT_MS ?? 2500);
   private readonly wsHandshakeTimeoutMs = Number(process.env.EXCHANGE_WS_HANDSHAKE_TIMEOUT_MS ?? 10000);
+  private readonly wsReconnectDelayMs: number;
+  private readonly wsIdleTimeoutMs: number;
   private readonly transportConfig: ExchangeTransportConfig;
   private readonly httpGet: HttpGet;
   private readonly WebSocketCtor: WebSocketCtor;
@@ -41,6 +45,8 @@ export class BinanceAdapter implements ExchangeAdapter {
     this.transportConfig = options.transportConfig ?? createExchangeTransportConfig();
     this.httpGet = options.httpGet ?? axios.get;
     this.WebSocketCtor = options.WebSocketCtor ?? WebSocket;
+    this.wsReconnectDelayMs = options.wsReconnectDelayMs ?? Number(process.env.EXCHANGE_WS_RECONNECT_DELAY_MS ?? 3000);
+    this.wsIdleTimeoutMs = options.wsIdleTimeoutMs ?? Number(process.env.EXCHANGE_WS_IDLE_TIMEOUT_MS ?? 45000);
   }
 
   async getKlines(
@@ -212,6 +218,14 @@ export class BinanceAdapter implements ExchangeAdapter {
     const attempts = createTransportAttempts(this.transportConfig.ws, this.transportConfig.proxyUrl);
     let activeSocket: WebSocket | null = null;
     let closedByUser = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearReconnectTimer = () => {
+      if (reconnectTimer !== null) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+    };
 
     const connectAttempt = (attemptIndex: number) => {
       const attempt = attempts[attemptIndex];
@@ -222,6 +236,8 @@ export class BinanceAdapter implements ExchangeAdapter {
 
       let opened = false;
       let retryScheduled = false;
+      let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+      let lastActivityAt = Date.now();
       const ws = new this.WebSocketCtor(url, {
         agent: attempt.agent,
         handshakeTimeout: this.wsHandshakeTimeoutMs,
@@ -231,20 +247,61 @@ export class BinanceAdapter implements ExchangeAdapter {
       this.wsConnections.set(key, ws);
       configure(ws);
 
+      const clearWatchdog = () => {
+        if (watchdogTimer !== null) {
+          clearInterval(watchdogTimer);
+          watchdogTimer = null;
+        }
+      };
+
+      const markActivity = () => {
+        lastActivityAt = Date.now();
+      };
+
       const scheduleRetry = () => {
-        if (retryScheduled || opened || closedByUser || attemptIndex + 1 >= attempts.length) {
+        if (retryScheduled || closedByUser) {
+          return false;
+        }
+
+        const nextAttemptIndex = opened ? 0 : attemptIndex + 1;
+        if (nextAttemptIndex >= attempts.length) {
           return false;
         }
 
         retryScheduled = true;
+        clearWatchdog();
         this.wsConnections.delete(key);
-        const delay = Math.min(1000 * Math.pow(2, attemptIndex), 30000);
-        setTimeout(() => connectAttempt(attemptIndex + 1), delay);
+        const delay = opened
+          ? this.wsReconnectDelayMs
+          : Math.min(1000 * Math.pow(2, attemptIndex), 30000);
+        clearReconnectTimer();
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          connectAttempt(nextAttemptIndex);
+        }, delay);
         return true;
       };
 
       ws.once('open', () => {
         opened = true;
+        markActivity();
+        clearReconnectTimer();
+        watchdogTimer = setInterval(() => {
+          if (closedByUser || activeSocket !== ws || ws.readyState !== WebSocket.OPEN) {
+            return;
+          }
+
+          if (Date.now() - lastActivityAt < this.wsIdleTimeoutMs) {
+            return;
+          }
+
+          console.warn(`Binance ${label} WebSocket idle for ${this.wsIdleTimeoutMs}ms, reconnecting...`);
+          safeCloseWebSocket(ws);
+        }, Math.max(1000, Math.floor(this.wsIdleTimeoutMs / 3)));
+      });
+
+      ws.on('message', () => {
+        markActivity();
       });
 
       ws.on('error', (error) => {
@@ -261,8 +318,10 @@ export class BinanceAdapter implements ExchangeAdapter {
       });
 
       ws.on('close', () => {
+        clearWatchdog();
         if (activeSocket === ws) {
           this.wsConnections.delete(key);
+          activeSocket = null;
         }
 
         if (scheduleRetry()) {
@@ -275,6 +334,7 @@ export class BinanceAdapter implements ExchangeAdapter {
 
     return () => {
       closedByUser = true;
+      clearReconnectTimer();
 
       if (activeSocket) {
         safeCloseWebSocket(activeSocket);

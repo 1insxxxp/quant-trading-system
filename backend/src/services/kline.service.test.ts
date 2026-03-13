@@ -44,11 +44,11 @@ vi.mock('./sync-state.service.js', () => ({
 
 import { KlineService } from './kline.service.js';
 
-function makeKline(openTime: number, exchange = 'binance') {
+function makeKline(openTime: number, exchange = 'binance', interval = '1h') {
   return {
     exchange,
     symbol: 'BTCUSDT',
-    interval: '1h',
+    interval,
     open_time: openTime,
     close_time: openTime + 1,
     open: 100,
@@ -57,6 +57,20 @@ function makeKline(openTime: number, exchange = 'binance') {
     close: 110,
     volume: 10,
     quote_volume: 1100,
+    is_closed: 1,
+  };
+}
+
+function makeFlatGapKline(openTime: number, price: number, exchange = 'binance', interval = '1h') {
+  return {
+    ...makeKline(openTime, exchange, interval),
+    open: price,
+    high: price,
+    low: price,
+    close: price,
+    volume: 0,
+    quote_volume: 0,
+    trades_count: 0,
     is_closed: 1,
   };
 }
@@ -165,6 +179,34 @@ describe('KlineService', () => {
     expect(result.hasMore).toBe(false);
   });
 
+  it('revalidates cached pages that contain synthetic flat gap candles', async () => {
+    mockDb.getKlines.mockResolvedValue([
+      makeFlatGapKline(120_000, 2134.2, 'binance', '15m'),
+      makeFlatGapKline(180_000, 2134.2, 'binance', '15m'),
+      makeKline(240_000, 'binance', '15m'),
+    ]);
+    binanceAdapterMock.getKlines.mockResolvedValue([
+      makeKline(120_000, 'binance', '15m'),
+      makeKline(180_000, 'binance', '15m'),
+      makeKline(240_000, 'binance', '15m'),
+    ]);
+
+    const service = new KlineService();
+
+    const result = await service.getKlines('binance', 'BTCUSDT', '15m', 2, 300_000);
+
+    expect(binanceAdapterMock.getKlines).toHaveBeenCalledWith('BTCUSDT', '15m', 3, 300_000);
+    expect(result.klines).toEqual([
+      makeKline(180_000, 'binance', '15m'),
+      makeKline(240_000, 'binance', '15m'),
+    ]);
+    expect(mockDb.saveKlines).toHaveBeenCalledWith([
+      makeKline(120_000, 'binance', '15m'),
+      makeKline(180_000, 'binance', '15m'),
+      makeKline(240_000, 'binance', '15m'),
+    ]);
+  });
+
   it('clears persisted hasMore when upstream confirms there is no older history', async () => {
     mockDb.getKlineSyncState.mockResolvedValue({
       exchange: 'binance',
@@ -227,6 +269,37 @@ describe('KlineService', () => {
     expect(result.map((item) => item.open_time)).toEqual([120_000, 180_000]);
   });
 
+  it('ignores misleading older db pages and recovers the explicit gap window from upstream', async () => {
+    mockDb.getKlines.mockResolvedValue([
+      makeKline(-180_000, 'binance', '1m'),
+      makeKline(-120_000, 'binance', '1m'),
+      makeKline(-60_000, 'binance', '1m'),
+      makeKline(0, 'binance', '1m'),
+      makeKline(60_000, 'binance', '1m'),
+    ]);
+    binanceAdapterMock.getKlines.mockResolvedValue([
+      makeKline(60_000, 'binance', '1m'),
+      makeKline(120_000, 'binance', '1m'),
+      makeKline(180_000, 'binance', '1m'),
+      makeKline(240_000, 'binance', '1m'),
+      makeKline(300_000, 'binance', '1m'),
+    ]);
+
+    const service = new KlineService();
+
+    const result = await service.recoverGapKlines(
+      'binance',
+      'BTCUSDT',
+      '1m',
+      60_000,
+      360_000,
+    );
+
+    expect(mockDb.getKlines).toHaveBeenCalledWith('binance', 'BTCUSDT', '1m', 5, 360_000);
+    expect(binanceAdapterMock.getKlines).toHaveBeenCalledWith('BTCUSDT', '1m', 5, 360_000);
+    expect(result.map((item) => item.open_time)).toEqual([120_000, 180_000, 240_000, 300_000]);
+  });
+
   it('falls back to exchange symbols when database is unavailable', async () => {
     mockDb.getSymbols.mockRejectedValue(new Error('db offline'));
     binanceAdapterMock.getSymbols.mockResolvedValue([
@@ -264,5 +337,44 @@ describe('KlineService', () => {
     const result = await service.getLatestCachedKline('binance', 'ETHUSDT', '1h');
 
     expect(result).toBeNull();
+  });
+
+  it('refreshes the latest seed candle from upstream when the cached interval is stale', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(225_000));
+
+    mockDb.getKlines.mockResolvedValue([
+      makeKline(120_000, 'binance', '1m'),
+    ]);
+    binanceAdapterMock.getKlines.mockResolvedValue([
+      makeKline(120_000, 'binance', '1m'),
+      makeKline(180_000, 'binance', '1m'),
+    ]);
+
+    const service = new KlineService();
+    const result = await service.getLatestCachedKline('binance', 'ETHUSDT', '1m');
+
+    expect(binanceAdapterMock.getKlines).toHaveBeenCalledWith('ETHUSDT', '1m', 2, undefined);
+    expect(result?.open_time).toBe(180_000);
+    expect(mockDb.saveKline).toHaveBeenCalledWith(makeKline(180_000, 'binance', '1m'));
+
+    vi.useRealTimers();
+  });
+
+  it('reuses the cached latest seed candle when it already belongs to the current interval bucket', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(225_000));
+
+    mockDb.getKlines.mockResolvedValue([
+      makeKline(180_000, 'binance', '1m'),
+    ]);
+
+    const service = new KlineService();
+    const result = await service.getLatestCachedKline('binance', 'ETHUSDT', '1m');
+
+    expect(binanceAdapterMock.getKlines).not.toHaveBeenCalled();
+    expect(result?.open_time).toBe(180_000);
+
+    vi.useRealTimers();
   });
 });

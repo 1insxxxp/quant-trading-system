@@ -2,10 +2,10 @@ import { createClient, type RedisClientType } from 'redis';
 import type { Kline } from '../types/index.js';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
-const KLINE_HOT_CACHE_TTL = 300;
+const KLINE_HOT_CACHE_TTL = 1800;
 const KLINE_COLD_CACHE_TTL = 7200;
 const KLINE_CACHE_PREFIX = 'kline:';
-const KLINE_HOT_LIMIT = 500;
+const KLINE_HOT_LIMIT = 1000;
 
 export class RedisCache {
   private client: RedisClientType | null = null;

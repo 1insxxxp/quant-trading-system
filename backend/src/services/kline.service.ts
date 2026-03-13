@@ -7,7 +7,6 @@ import { syncStateService } from './sync-state.service.js';
 
 const DEFAULT_INITIAL_KLINE_LIMIT = 500;
 const DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
-const DB_QUERY_TIMEOUT_MS = 1000;
 
 const INTERVAL_MS: Record<string, number> = {
   '1m': 60 * 1000,
@@ -51,11 +50,17 @@ export class KlineService {
 
     // 2. 有 before 参数（历史数据加载）时，优先查 DB（预热数据已在库中）
     const dbResult = await this.queryKlinesFromDb(exchange, symbol, interval, requestLimit, before);
+    const cleanedDbResult = sanitizeKlineWindow(dbResult ?? [], interval);
+    const dbWindowNeedsRemoteRepair = cleanedDbResult.length > 0 && hasWindowIntegrityIssues(cleanedDbResult, interval);
 
-    if (dbResult && dbResult.length >= requestLimit) {
+    if (cleanedDbResult.length >= requestLimit && !dbWindowNeedsRemoteRepair) {
       const syncState = await db.getKlineSyncState(exchange, symbol, interval).catch(() => null);
+      // DB 命中时异步回写 Redis，避免 TTL 过期后每次都穿透到 DB
+      if (before === undefined) {
+        void redisCache.setKlines(exchange, symbol, interval, cleanedDbResult).catch(() => {});
+      }
       return {
-        klines: dbResult.slice(-limit),
+        klines: cleanedDbResult.slice(-limit),
         source: 'cache',
         hasMore: syncState?.has_more_history ?? true,
       };
@@ -66,7 +71,10 @@ export class KlineService {
 
     if (remoteResult) {
       const { klines: remoteKlines, hasMore } = remoteResult;
-      const mergedKlines = normalizeKlines([...(dbResult || []), ...remoteKlines]);
+      const mergedKlines = sanitizeKlineWindow(
+        normalizeKlines([...cleanedDbResult, ...remoteKlines]),
+        interval,
+      );
 
       // 异步持久化，不阻塞返回
       this.persistKlines(exchange, symbol, interval, remoteKlines, mergedKlines, hasMore).catch(() => {});
@@ -79,9 +87,9 @@ export class KlineService {
     }
 
     // 4. 兜底：返回 DB 查询结果（即使不足）
-    if (dbResult && dbResult.length > 0) {
+    if (cleanedDbResult.length > 0) {
       return {
-        klines: dbResult.slice(-limit),
+        klines: cleanedDbResult.slice(-limit),
         source: 'cache',
         hasMore: false,
       };
@@ -182,9 +190,25 @@ export class KlineService {
     symbol: string,
     interval: string,
   ): Promise<Kline | null> {
+    const currentIntervalOpenTime = floorToInterval(Date.now(), interval);
+
     try {
       const klines = await db.getKlines(exchange, symbol, interval, 1) as Kline[];
-      return klines[0] ?? null;
+      const latestCached = klines[0] ?? null;
+
+      if (latestCached && latestCached.open_time >= currentIntervalOpenTime) {
+        return latestCached;
+      }
+
+      const remoteResult = await this.queryKlinesFromRemote(exchange, symbol, interval, 2);
+      const latestRemote = remoteResult?.klines[remoteResult.klines.length - 1] ?? null;
+
+      if (latestRemote) {
+        void this.saveKline(latestRemote).catch(() => {});
+        return latestRemote;
+      }
+
+      return latestCached;
     } catch (error: any) {
       console.warn(`DB unavailable for latest cached kline ${exchange}:${symbol}:${interval}: ${error.message}`);
       return null;
@@ -208,18 +232,36 @@ export class KlineService {
       return [];
     }
 
-    const result = await this.getKlines(
+    const requestLimit = missingCount + 1;
+    const dbWindow = await this.queryKlinesFromDb(
       exchange,
       symbol,
       interval,
-      missingCount,
+      requestLimit,
       toExclusiveOpenTime,
     );
-
-    return normalizeKlines(result.klines).filter((kline) => (
+    const dbGapKlines = normalizeKlines(dbWindow ?? []).filter((kline) => (
       kline.open_time > fromExclusiveOpenTime &&
       kline.open_time < toExclusiveOpenTime
     ));
+
+    if (dbGapKlines.length >= missingCount) {
+      return dbGapKlines;
+    }
+
+    const remoteWindow = await this.queryKlinesFromRemote(
+      exchange,
+      symbol,
+      interval,
+      requestLimit,
+      toExclusiveOpenTime,
+    );
+    const remoteGapKlines = normalizeKlines(remoteWindow?.klines ?? []).filter((kline) => (
+      kline.open_time > fromExclusiveOpenTime &&
+      kline.open_time < toExclusiveOpenTime
+    ));
+
+    return normalizeKlines([...dbGapKlines, ...remoteGapKlines]);
   }
 
   getExchanges(): string[] {
@@ -255,25 +297,6 @@ export class KlineService {
     return results.flat();
   }
 
-  private buildFallbackResult(cached: Kline[], limit: number, persistedHasMore: boolean = false): KlineQueryResult {
-    const hasMore = cached.length > limit || persistedHasMore;
-    const klines = cached.slice(-limit);
-
-    if (cached.length > 0) {
-      return {
-        klines,
-        source: 'cache',
-        hasMore,
-      };
-    }
-
-    return {
-      klines: [],
-      source: 'cache',
-      hasMore: false,
-    };
-  }
-
   private async fetchPagedRemoteKlines(
     adapter: ExchangeAdapter,
     symbol: string,
@@ -303,6 +326,66 @@ function normalizeKlines(klines: Kline[]): Kline[] {
   return [...deduped.values()];
 }
 
+function sanitizeKlineWindow(klines: Kline[], interval: string): Kline[] {
+  return normalizeKlines(klines).filter((kline, index, window) => {
+    if (!isSyntheticGapPlaceholder(kline)) {
+      return true;
+    }
+
+    const previous = window[index - 1];
+    const next = window[index + 1];
+    const intervalMs = getIntervalMs(interval);
+    const expectedPreviousOpenTime = kline.open_time - intervalMs;
+    const expectedNextOpenTime = kline.open_time + intervalMs;
+
+    if (!previous || !next) {
+      return false;
+    }
+
+    return !(
+      previous.open_time === expectedPreviousOpenTime &&
+      next.open_time === expectedNextOpenTime
+    );
+  });
+}
+
+function hasWindowIntegrityIssues(klines: Kline[], interval: string): boolean {
+  const normalized = normalizeKlines(klines);
+  const intervalMs = getIntervalMs(interval);
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    const current = normalized[index];
+    const previous = normalized[index - 1];
+
+    if (current && isSyntheticGapPlaceholder(current)) {
+      return true;
+    }
+
+    if (previous && current && current.open_time - previous.open_time > intervalMs) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isSyntheticGapPlaceholder(kline: Kline): boolean {
+  return (
+    kline.is_closed === 1 &&
+    kline.volume === 0 &&
+    kline.quote_volume === 0 &&
+    (kline.trades_count ?? 0) === 0 &&
+    kline.open === kline.high &&
+    kline.open === kline.low &&
+    kline.open === kline.close
+  );
+}
+
 function getIntervalMs(interval: string): number {
   return INTERVAL_MS[interval] ?? DEFAULT_INTERVAL_MS;
+}
+
+function floorToInterval(timestamp: number, interval: string): number {
+  const intervalMs = getIntervalMs(interval);
+  return Math.floor(timestamp / intervalMs) * intervalMs;
 }

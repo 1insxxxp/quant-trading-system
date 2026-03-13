@@ -55,6 +55,13 @@ app.get('/api/version', (_req, res) => {
 
 app.get('/api/klines', async (req, res) => {
   try {
+    res.set({
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      Pragma: 'no-cache',
+      Expires: '0',
+      'Surrogate-Control': 'no-store',
+    });
+
     const { exchange, symbol, interval, limit, before } = req.query;
 
     if (!exchange || !symbol || !interval) {
@@ -197,23 +204,26 @@ async function initExchangeData() {
     console.log('Preloading historical klines...');
 
     const symbolsToLoad = ['BTCUSDT', 'ETHUSDT'];
-    const intervals = ['1h'];
+    const intervals = ['5m', '1h', '4h'];
 
-    for (const symbol of symbolsToLoad) {
-      for (const interval of intervals) {
-        try {
-          console.log(`  Preloading ${symbol} ${interval}...`);
-          const klines = await binanceAdapter.getKlines(symbol, interval, 1000);
+    await Promise.all(
+      symbolsToLoad.flatMap((symbol) =>
+        intervals.map(async (interval) => {
+          try {
+            console.log(`  Preloading ${symbol} ${interval}...`);
+            const klines = await binanceAdapter.getKlines(symbol, interval, 1000);
 
-          if (klines.length > 0) {
-            await db.saveKlines(klines);
-            console.log(`    Saved ${klines.length} klines`);
+            if (klines.length > 0) {
+              await db.saveKlines(klines);
+              void redisCache.setKlines('binance', symbol, interval, klines).catch(() => {});
+              console.log(`    Saved ${klines.length} klines for ${symbol} ${interval}`);
+            }
+          } catch (error: any) {
+            console.error(`    Preload failed for ${symbol} ${interval}: ${error.message}`);
           }
-        } catch (error: any) {
-          console.error(`    Preload failed: ${error.message}`);
-        }
-      }
-    }
+        }),
+      ),
+    );
 
     console.log('Exchange warmup complete');
   } catch (error: any) {

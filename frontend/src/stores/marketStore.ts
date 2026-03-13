@@ -29,7 +29,7 @@ const DEFAULT_MARKET_SELECTION = {
   symbol: 'BTCUSDT',
   interval: '1h',
 } as const;
-const INITIAL_KLINE_LIMIT = 500;
+const INITIAL_KLINE_LIMIT = 1000;
 const OLDER_KLINE_PAGE_SIZE = 500;
 const DEFAULT_OLDER_KLINE_LOAD_ERROR = '加载历史K线失败，请重试。';
 
@@ -96,6 +96,8 @@ export const useMarketStore = create<MarketState>((set, get) => ({
 
       return {
         exchange,
+        klines: [],
+        klineSource: 'empty',
         latestPrice: null,
         lastPriceTimestamp: null,
         isLoadingKlines: true,
@@ -117,6 +119,8 @@ export const useMarketStore = create<MarketState>((set, get) => ({
 
       return {
         symbol,
+        klines: [],
+        klineSource: 'empty',
         latestPrice: null,
         lastPriceTimestamp: null,
         isLoadingKlines: true,
@@ -138,6 +142,8 @@ export const useMarketStore = create<MarketState>((set, get) => ({
 
       return {
         interval,
+        klines: [],
+        klineSource: 'empty',
         latestPrice: null,
         lastPriceTimestamp: null,
         isLoadingKlines: true,
@@ -189,11 +195,24 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       return;
     }
 
+    // Skip synthetic gap placeholder candles (TradeAggregator fills time gaps with flat zero-volume candles)
+    // These would corrupt existing REST API data by overwriting correct close/low values
+    if (
+      kline.is_closed === 1 &&
+      kline.volume === 0 &&
+      kline.quote_volume === 0 &&
+      kline.open === kline.high &&
+      kline.open === kline.low &&
+      kline.open === kline.close
+    ) {
+      return;
+    }
+
     const index = klines.findIndex((item) => item.open_time === kline.open_time);
 
     if (index >= 0) {
       const nextKlines = [...klines];
-      nextKlines[index] = kline;
+      nextKlines[index] = mergeRealtimeKline(nextKlines[index], kline);
       nextKlines.sort((a, b) => a.open_time - b.open_time);
       set({
         klines: nextKlines,
@@ -268,7 +287,10 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         return;
       }
 
-      const nextKlines = normalizeKlines(initialResult.klines ?? []);
+      const bufferedRealtimeKlines = getMarketKey(get().exchange, get().symbol, get().interval) === marketKey
+        ? get().klines
+        : [];
+      const nextKlines = normalizeKlines([...(initialResult.klines ?? []), ...bufferedRealtimeKlines]);
       const hasMoreHistory = initialResult.hasMore ?? false;
       const source = resolveKlineSource(initialResult.source, nextKlines);
       set({
@@ -553,6 +575,23 @@ function normalizeSymbols(
     }));
 }
 
+function mergeRealtimeKline(existing: Kline, incoming: Kline): Kline {
+  const merged: Kline = {
+    ...incoming,
+    open: existing.open,
+    high: Math.max(existing.high, incoming.high),
+    low: Math.min(existing.low, incoming.low),
+    volume: Math.max(existing.volume, incoming.volume),
+    quote_volume: Math.max(existing.quote_volume, incoming.quote_volume),
+  };
+
+  if (typeof existing.trades_count === 'number' || typeof incoming.trades_count === 'number') {
+    merged.trades_count = Math.max(existing.trades_count ?? 0, incoming.trades_count ?? 0);
+  }
+
+  return merged;
+}
+
 function normalizeKlines(klines: Kline[]): Kline[] {
   const deduped = new Map<number, Kline>();
 
@@ -578,6 +617,8 @@ function applySymbolOptions(
     symbols: resolvedSymbols,
     symbol: resolvedSymbol,
     isLoadingSymbols: false,
+    klines: [],
+    klineSource: 'empty',
     olderKlineLoadError: null,
     ...(resolvedSymbol !== currentSymbol
       ? { latestPrice: null, lastPriceTimestamp: null, isLoadingKlines: true }
@@ -609,6 +650,9 @@ async function fetchKlinePage(params: {
   const beforeQuery = typeof before === 'number' ? `&before=${before}` : '';
   const response = await fetch(
     `/quant/api/klines?exchange=${exchange}&symbol=${symbol}&interval=${interval}&limit=${limit}${beforeQuery}`,
+    {
+      cache: 'no-store',
+    },
   );
 
   return readJsonResponse<BackendKlineResponse>(response);

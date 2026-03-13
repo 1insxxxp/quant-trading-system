@@ -5,6 +5,7 @@ import { createExchangeTransportConfig } from '../network/exchange-transport.js'
 class FakeWebSocket {
   static calls: Array<{ url: string; options: Record<string, unknown> | undefined }> = [];
   static behaviors: Array<'open' | 'error-before-open'> = [];
+  static instances: FakeWebSocket[] = [];
   readyState = 1;
   onmessage: ((event: { data: string }) => void) | null = null;
   onclose: (() => void) | null = null;
@@ -14,6 +15,7 @@ class FakeWebSocket {
 
   constructor(url: string, options?: Record<string, unknown>) {
     FakeWebSocket.calls.push({ url, options });
+    FakeWebSocket.instances.push(this);
     const behavior = FakeWebSocket.behaviors.shift() ?? 'open';
 
     queueMicrotask(() => {
@@ -54,6 +56,15 @@ class FakeWebSocket {
   close() {
     this.emit('close');
     this.onclose?.();
+  }
+
+  terminate() {
+    this.close();
+  }
+
+  triggerMessage(data: string) {
+    this.emit('message', Buffer.from(data));
+    this.onmessage?.({ data });
   }
 
   private emit(event: string, ...args: any[]) {
@@ -112,8 +123,10 @@ describe('BinanceAdapter transport routing', () => {
   });
 
   it('falls back from proxy WebSocket to direct WebSocket when the first handshake fails', async () => {
+    vi.useFakeTimers();
     FakeWebSocket.calls = [];
     FakeWebSocket.behaviors = ['error-before-open', 'open'];
+    FakeWebSocket.instances = [];
 
     const adapter = new BinanceAdapter({
       transportConfig: createExchangeTransportConfig({
@@ -125,11 +138,66 @@ describe('BinanceAdapter transport routing', () => {
     });
 
     adapter.subscribeTrades('ETHUSDT', vi.fn());
-    await Promise.resolve();
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1000);
 
     expect(FakeWebSocket.calls).toHaveLength(2);
     expect(FakeWebSocket.calls[0].options?.agent).toBeDefined();
     expect(FakeWebSocket.calls[1].options?.agent).toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it('reconnects after an established socket closes unexpectedly', async () => {
+    vi.useFakeTimers();
+    FakeWebSocket.calls = [];
+    FakeWebSocket.behaviors = ['open', 'open'];
+    FakeWebSocket.instances = [];
+
+    const adapter = new BinanceAdapter({
+      transportConfig: createExchangeTransportConfig({
+        EXCHANGE_WS_TRANSPORT: 'proxy',
+        EXCHANGE_PROXY_URL: 'http://127.0.0.1:7890',
+      }),
+      httpGet: vi.fn(),
+      WebSocketCtor: FakeWebSocket as never,
+    });
+
+    adapter.subscribeTrades('ETHUSDT', vi.fn());
+    await Promise.resolve();
+
+    expect(FakeWebSocket.calls).toHaveLength(1);
+
+    FakeWebSocket.instances[0].close();
+    await vi.advanceTimersByTimeAsync(3000);
+
+    expect(FakeWebSocket.calls).toHaveLength(2);
+    expect(FakeWebSocket.calls[1].options?.agent).toBeDefined();
+    vi.useRealTimers();
+  });
+
+  it('reconnects after the trade stream stays idle past the watchdog timeout', async () => {
+    vi.useFakeTimers();
+    FakeWebSocket.calls = [];
+    FakeWebSocket.behaviors = ['open', 'open'];
+    FakeWebSocket.instances = [];
+
+    const adapter = new BinanceAdapter({
+      transportConfig: createExchangeTransportConfig({
+        EXCHANGE_WS_TRANSPORT: 'direct',
+      }),
+      httpGet: vi.fn(),
+      WebSocketCtor: FakeWebSocket as never,
+      wsIdleTimeoutMs: 1_000,
+      wsReconnectDelayMs: 1,
+    });
+
+    adapter.subscribeTrades('ETHUSDT', vi.fn());
+    await Promise.resolve();
+
+    expect(FakeWebSocket.calls).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(1_100);
+
+    expect(FakeWebSocket.calls).toHaveLength(2);
+    vi.useRealTimers();
   });
 });

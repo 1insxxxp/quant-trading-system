@@ -37,7 +37,6 @@ describe('buildCandlestickData', () => {
         makeKline(60_000, 100),
         makeKline(240_000, 105),
       ],
-      '1m',
     );
 
     expect(data.map((item) => Number(item.time))).toEqual([60, 120, 180, 240]);

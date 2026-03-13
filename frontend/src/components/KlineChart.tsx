@@ -178,9 +178,7 @@ export const KlineChart: React.FC = () => {
       }
     };
 
-    const handleVisibleTimeRangeChange = (
-      range: { from: Time; to: Time } | null,
-    ) => {
+    const handleVisibleTimeRangeChange = () => {
       // Chart view state persistence removed
     };
 
@@ -253,12 +251,24 @@ export const KlineChart: React.FC = () => {
     const marketKey = `${exchange}:${symbol}:${interval}`;
 
     if (klines.length === 0) {
-      // Do not clear chart data when klines is empty - this causes flickering
-      // Just skip update and wait for data to arrive
+      candleSeriesRef.current.setData([]);
+      syncIndicatorSeries({
+        klines: [],
+        settings: indicatorSettings,
+        series: {
+          volume: volumeSeriesRef.current,
+          ma5: ma5SeriesRef.current,
+          ma10: ma10SeriesRef.current,
+          ma20: ma20SeriesRef.current,
+        },
+      });
+      previousDataRef.current = [];
+      previousMarketKeyRef.current = marketKey;
+      isHistoryPagingReadyRef.current = false;
       return;
     }
 
-    const data = buildCandlestickData(klines, interval);
+    const data = buildCandlestickData(klines);
     const previousData = previousDataRef.current;
     const nextLast = data[data.length - 1];
 
@@ -541,19 +551,4 @@ function resolveKlineFromCrosshair(params: {
   }
 
   return klines.find((item) => item.open_time === hoveredTimestamp) ?? klines[klines.length - 1] ?? null;
-}
-
-function applyDefaultVisibleRange(chart: IChartApi | null, data: CandlestickData[], interval: string) {
-  if (!chart || data.length === 0) {
-    return;
-  }
-
-  const visibleBars = Math.min(data.length, MIN_DEFAULT_VISIBLE_BARS);
-  const startIndex = Math.max(0, data.length - visibleBars);
-  const endIndex = Math.max(startIndex, data.length - 1);
-
-  chart.timeScale().setVisibleLogicalRange({
-    from: startIndex,
-    to: endIndex + DEFAULT_RIGHT_PADDING_BARS,
-  });
 }

@@ -117,7 +117,10 @@ export const useWebSocket = () => {
       try {
         const response = await fetch(
           `/quant/api/klines?exchange=${exchange}&symbol=${symbol}&interval=${PRICE_FALLBACK_INTERVAL}&limit=1`,
-          { signal: abortController.signal },
+          {
+            signal: abortController.signal,
+            cache: 'no-store',
+          },
         );
         const payload = await response.json() as {
           success?: boolean;
