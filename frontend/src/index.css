@@ -1467,9 +1467,14 @@ input[type='checkbox'] {
 .chart-inspector__metrics {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px 10px;
   min-width: 0;
+  overflow-x: auto;
+}
+
+.chart-inspector__metrics::-webkit-scrollbar {
+  display: none;
 }
 
 .chart-inspector__empty {
@@ -2867,6 +2872,12 @@ body::after {
 
 .chart-panel__hud--terminal .chart-inspector__metrics {
   gap: 5px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.chart-panel__hud--terminal .chart-inspector__metrics::-webkit-scrollbar {
+  display: none;
 }
 
 .chart-panel__hud--terminal .chart-inspector__metric {
