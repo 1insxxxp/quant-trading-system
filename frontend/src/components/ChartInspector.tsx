@@ -69,12 +69,12 @@ export const ChartInspector: React.FC<ChartInspectorProps> = ({ marketLabel, sna
     <aside className={`chart-inspector chart-inspector--${direction}`}>
       <strong className="chart-inspector__market">{marketLabel}</strong>
       <div className="chart-inspector__metrics">
-        {renderMetric({ label: '开', value: formatValue(snapshot.open), tone: direction })}
-        {renderMetric({ label: '高', value: formatValue(snapshot.high), tone: direction })}
-        {renderMetric({ label: '低', value: formatValue(snapshot.low), tone: direction })}
-        {renderMetric({ label: '收', value: formatValue(snapshot.close), tone: direction })}
+        {renderMetric({ label: '开=', value: formatValue(snapshot.open), tone: direction })}
+        {renderMetric({ label: '高=', value: formatValue(snapshot.high), tone: direction })}
+        {renderMetric({ label: '低=', value: formatValue(snapshot.low), tone: direction })}
+        {renderMetric({ label: '收=', value: formatValue(snapshot.close), tone: direction })}
         {renderMetric({
-          label: '涨跌',
+          label: '涨跌=',
           value: `${formatSignedValue(snapshot.change)} (${snapshot.percent >= 0 ? '+' : ''}${snapshot.percent.toFixed(2)}%)`,
           tone: direction,
           wide: true,
