@@ -265,9 +265,9 @@ export const KlineChart: React.FC = () => {
     // Force replace mode on initial load, market change, or when data size grows significantly
     const isInitialLoad = previousData.length === 0;
     const isMarketChange = previousMarketKeyRef.current !== marketKey;
-    const isDataGrowth = data.length > previousData.length * 1.5;
+    const isSignificantDataGrowth = data.length >= 50 && previousData.length < 50;
 
-    const updateMode = isInitialLoad || isMarketChange || isDataGrowth
+    const updateMode = isInitialLoad || isMarketChange || isSignificantDataGrowth
       ? 'replace'
       : resolveChartUpdateMode({
           previousData,
@@ -283,9 +283,6 @@ export const KlineChart: React.FC = () => {
       }
 
       candleSeriesRef.current.setData(data);
-
-      // Force chart to show correct number of bars
-      chartRef.current?.timeScale().fitContent();
 
       // Set explicit visible range to show the latest bars
       const visibleBars = Math.min(data.length, MIN_DEFAULT_VISIBLE_BARS);
