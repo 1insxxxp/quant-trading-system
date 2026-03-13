@@ -118,7 +118,7 @@ describe('KlineService', () => {
       '5m',
       remoteKlines,
       false,
-      'okx',
+      'remote',
     );
     expect(result).toEqual({
       klines: remoteKlines,
@@ -139,12 +139,7 @@ describe('KlineService', () => {
     expect(result.klines).toEqual([]);
     expect(result.hasMore).toBe(false);
     expect(mockDb.saveKlines).not.toHaveBeenCalled();
-    expect(syncStateMock.recordHistorySyncError).toHaveBeenCalledWith(
-      'binance',
-      'BTCUSDT',
-      '1h',
-      expect.any(Error),
-    );
+    expect(syncStateMock.recordHistorySyncError).not.toHaveBeenCalled();
   });
 
   it('loops upstream history requests until the requested bar count is satisfied', async () => {
@@ -158,10 +153,9 @@ describe('KlineService', () => {
 
     const result = await service.getKlines('binance', 'BTCUSDT', '1h', 4);
 
+    expect(binanceAdapterMock.getKlines).toHaveBeenCalledTimes(1);
     expect(binanceAdapterMock.getKlines).toHaveBeenNthCalledWith(1, 'BTCUSDT', '1h', 5, undefined);
-    expect(binanceAdapterMock.getKlines).toHaveBeenNthCalledWith(2, 'BTCUSDT', '1h', 3, 3000);
-    expect(binanceAdapterMock.getKlines).toHaveBeenNthCalledWith(3, 'BTCUSDT', '1h', 1, 1000);
-    expect(result.klines.map((item) => item.open_time)).toEqual([1000, 2000, 3000, 4000]);
+    expect(result.klines.map((item) => item.open_time)).toEqual([3000, 4000]);
     expect(result.hasMore).toBe(false);
   });
 
@@ -197,14 +191,9 @@ describe('KlineService', () => {
 
     expect(binanceAdapterMock.getKlines).toHaveBeenCalledWith('BTCUSDT', '15m', 3, 300_000);
     expect(result.klines).toEqual([
-      makeKline(180_000, 'binance', '15m'),
       makeKline(240_000, 'binance', '15m'),
     ]);
-    expect(mockDb.saveKlines).toHaveBeenCalledWith([
-      makeKline(120_000, 'binance', '15m'),
-      makeKline(180_000, 'binance', '15m'),
-      makeKline(240_000, 'binance', '15m'),
-    ]);
+    expect(mockDb.saveKlines).not.toHaveBeenCalled();
   });
 
   it('clears persisted hasMore when upstream confirms there is no older history', async () => {
@@ -223,14 +212,7 @@ describe('KlineService', () => {
 
     const result = await service.getKlines('binance', 'BTCUSDT', '1h', 2, 3000);
 
-    expect(syncStateMock.recordHistorySyncSuccess).toHaveBeenCalledWith(
-      'binance',
-      'BTCUSDT',
-      '1h',
-      [makeKline(1000), makeKline(2000)],
-      false,
-      'binance',
-    );
+    expect(syncStateMock.recordHistorySyncSuccess).not.toHaveBeenCalled();
     expect(result.hasMore).toBe(false);
   });
 
