@@ -173,7 +173,7 @@ export class DatabaseService {
   ): Promise<any[]> {
     return new Promise((resolve, reject) => {
       const beforeCondition = typeof before === 'number'
-        ? ' AND open_time < ?'
+        ? ' AND open_time <= ?'
         : '';
       const params = typeof before === 'number'
         ? [exchange, symbol, interval, before, limit]

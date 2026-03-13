@@ -168,7 +168,7 @@ export class DatabaseService {
       WHERE exchange = $1
         AND symbol = $2
         AND interval = $3
-        ${hasBefore ? 'AND open_time < $4' : ''}
+        ${hasBefore ? 'AND open_time <= $4' : ''}
       ORDER BY open_time DESC
       LIMIT ${hasBefore ? '$5' : '$4'}
     `;

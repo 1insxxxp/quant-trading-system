@@ -63,7 +63,7 @@ export class BinanceAdapter implements ExchangeAdapter {
             symbol: symbol.toUpperCase(),
             interval: this.intervalMap[interval] || '1h',
             limit: Math.min(limit, 1000),
-            ...(typeof before === 'number' ? { endTime: before - 1 } : {}),
+            ...(typeof before === 'number' ? { endTime: before } : {}),
           },
           httpAgent: attempt.agent,
           httpsAgent: attempt.agent,

@@ -347,6 +347,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     set({ isLoadingOlderKlines: true, olderKlineLoadError: null });
 
     try {
+      // Pass earliestOpenTime directly - backend will fetch data ending at this timestamp
       const data = await fetchKlinePage({
         exchange,
         symbol,
