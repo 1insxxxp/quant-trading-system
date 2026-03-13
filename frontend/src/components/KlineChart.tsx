@@ -363,7 +363,7 @@ export const KlineChart: React.FC = () => {
 
   useEffect(() => {
     setHoveredKline(null);
-  }, [klines, exchange, symbol, interval]);
+  }, [exchange, symbol, interval]);
 
   const legendItems = buildIndicatorLegend(klines, indicatorSettings);
   const activeKline = hoveredKline ?? klines[klines.length - 1] ?? null;
