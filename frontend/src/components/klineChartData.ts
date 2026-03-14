@@ -3,6 +3,11 @@ import type { Kline } from '../types';
 
 export type ChartUpdateMode = 'replace' | 'update-last' | 'append' | 'prepend' | 'repair';
 const HISTORY_LOAD_EDGE_THRESHOLD = 50;
+const DETACHED_REALTIME_PRICE_THRESHOLD = 5;
+export interface LogicalRange {
+  from: number;
+  to: number;
+}
 
 export function buildCandlestickData(klines: Kline[]): CandlestickData[] {
   const deduped = new Map<number, Kline>();
@@ -163,7 +168,53 @@ export function shouldLoadOlderKlines(params: {
     return false;
   }
 
+  return isNearHistoryLoadEdge(visibleFrom);
+}
+
+export function isNearHistoryLoadEdge(visibleFrom: number | null | undefined): boolean {
+  if (typeof visibleFrom !== 'number') {
+    return false;
+  }
+
   return visibleFrom <= HISTORY_LOAD_EDGE_THRESHOLD;
+}
+
+export function shouldShowDetachedRealtimePriceLine(params: {
+  latestPrice: number | null;
+  latestLogicalIndex: number | null;
+  visibleTo: number | null | undefined;
+}): boolean {
+  const {
+    latestPrice,
+    latestLogicalIndex,
+    visibleTo,
+  } = params;
+
+  if (typeof latestPrice !== 'number' || typeof latestLogicalIndex !== 'number' || typeof visibleTo !== 'number') {
+    return false;
+  }
+
+  return visibleTo < latestLogicalIndex - DETACHED_REALTIME_PRICE_THRESHOLD;
+}
+
+export function resolveVisibleRangeAfterPrepend(params: {
+  visibleRange: LogicalRange | null | undefined;
+  prependedCount: number;
+  keepPinnedToLeftEdge: boolean;
+}): LogicalRange | null {
+  const {
+    visibleRange,
+    prependedCount,
+  } = params;
+
+  if (!visibleRange) {
+    return null;
+  }
+
+  return {
+    from: visibleRange.from + prependedCount,
+    to: visibleRange.to + prependedCount,
+  };
 }
 
 function containsTimeSequence(

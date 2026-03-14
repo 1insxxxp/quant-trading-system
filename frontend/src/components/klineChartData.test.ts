@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { CandlestickData } from 'lightweight-charts';
-import { buildCandlestickData, resolveChartUpdateMode, shouldLoadOlderKlines } from './klineChartData';
+import {
+  buildCandlestickData,
+  isNearHistoryLoadEdge,
+  resolveChartUpdateMode,
+  shouldShowDetachedRealtimePriceLine,
+  resolveVisibleRangeAfterPrepend,
+  shouldLoadOlderKlines,
+} from './klineChartData';
 import type { Kline } from '../types';
 
 function makePoint(time: number): CandlestickData {
@@ -114,6 +121,13 @@ describe('resolveChartUpdateMode', () => {
 });
 
 describe('shouldLoadOlderKlines', () => {
+  it('treats the left-edge threshold as near-edge for auto pagination', () => {
+    expect(isNearHistoryLoadEdge(0)).toBe(true);
+    expect(isNearHistoryLoadEdge(20)).toBe(true);
+    expect(isNearHistoryLoadEdge(80)).toBe(false);
+    expect(isNearHistoryLoadEdge(null)).toBe(false);
+  });
+
   it('does not load older history before history paging is armed', () => {
     expect(
       shouldLoadOlderKlines({
@@ -158,6 +172,78 @@ describe('shouldLoadOlderKlines', () => {
         hasMoreHistoricalKlines: true,
         isHistoryPagingReady: true,
         hasOlderLoadError: true,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('resolveVisibleRangeAfterPrepend', () => {
+  it('preserves the current viewport after prepending history so one edge touch loads one page', () => {
+    expect(
+      resolveVisibleRangeAfterPrepend({
+        visibleRange: { from: 0, to: 80 },
+        prependedCount: 1000,
+        keepPinnedToLeftEdge: true,
+      }),
+    ).toEqual({ from: 1000, to: 1080 });
+  });
+
+  it('preserves the current visible bars when not edge-pinned', () => {
+    expect(
+      resolveVisibleRangeAfterPrepend({
+        visibleRange: { from: 12, to: 92 },
+        prependedCount: 1000,
+        keepPinnedToLeftEdge: false,
+      }),
+    ).toEqual({ from: 1012, to: 1092 });
+  });
+
+  it('returns null when there is no previous visible range', () => {
+    expect(
+      resolveVisibleRangeAfterPrepend({
+        visibleRange: null,
+        prependedCount: 1000,
+        keepPinnedToLeftEdge: true,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe('shouldShowDetachedRealtimePriceLine', () => {
+  it('shows the realtime marker when the viewport is away from the latest candles', () => {
+    expect(
+      shouldShowDetachedRealtimePriceLine({
+        latestPrice: 2077.66,
+        latestLogicalIndex: 120,
+        visibleTo: 92,
+      }),
+    ).toBe(true);
+  });
+
+  it('hides the realtime marker when the viewport is still near realtime', () => {
+    expect(
+      shouldShowDetachedRealtimePriceLine({
+        latestPrice: 2077.66,
+        latestLogicalIndex: 120,
+        visibleTo: 118,
+      }),
+    ).toBe(false);
+  });
+
+  it('hides the realtime marker when there is no realtime price or no chart data', () => {
+    expect(
+      shouldShowDetachedRealtimePriceLine({
+        latestPrice: null,
+        latestLogicalIndex: 120,
+        visibleTo: 90,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldShowDetachedRealtimePriceLine({
+        latestPrice: 2077.66,
+        latestLogicalIndex: null,
+        visibleTo: 90,
       }),
     ).toBe(false);
   });

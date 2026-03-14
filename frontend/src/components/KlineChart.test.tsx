@@ -111,4 +111,56 @@ describe('KlineChart', () => {
     expect(markup).not.toContain('MA10');
     expect(markup).not.toContain('MA20');
   });
+
+  it('renders a compact left-edge history loading rail while older history is loading', () => {
+    mockMarketState.klines = Array.from({ length: 4 }, (_, index) => ({
+      exchange: 'binance',
+      symbol: 'ETHUSDT',
+      interval: '5m',
+      open_time: 1_741_536_000_000 + index * 300_000,
+      close_time: 1_741_536_300_000 + index * 300_000,
+      open: 2000 + index,
+      high: 2004 + index,
+      low: 1996 + index,
+      close: 2001 + index,
+      volume: 10 + index,
+      quote_volume: 20_000 + index * 100,
+      is_closed: 1,
+    }));
+    mockMarketState.isLoadingOlderKlines = true;
+
+    const markup = renderToStaticMarkup(<KlineChart />);
+
+    expect(markup).toContain('chart-history-edge chart-history-edge--loading');
+    expect(markup).toContain('chart-history-edge__rail');
+    expect(markup).toContain('chart-history-edge__beam');
+    expect(markup).toContain('chart-history-edge__label');
+    expect(markup).toContain('\u52a0\u8f7d\u5386\u53f2');
+  });
+
+  it('renders a compact left-edge retry affordance when older history loading fails', () => {
+    mockMarketState.klines = Array.from({ length: 4 }, (_, index) => ({
+      exchange: 'binance',
+      symbol: 'ETHUSDT',
+      interval: '5m',
+      open_time: 1_741_536_000_000 + index * 300_000,
+      close_time: 1_741_536_300_000 + index * 300_000,
+      open: 2000 + index,
+      high: 2004 + index,
+      low: 1996 + index,
+      close: 2001 + index,
+      volume: 10 + index,
+      quote_volume: 20_000 + index * 100,
+      is_closed: 1,
+    }));
+    mockMarketState.olderKlineLoadError = 'HTTP 502';
+
+    const markup = renderToStaticMarkup(<KlineChart />);
+
+    expect(markup).toContain('chart-history-edge chart-history-edge--error');
+    expect(markup).toContain('chart-history-edge__label');
+    expect(markup).toContain('chart-history-edge__retry');
+    expect(markup).toContain('\u52a0\u8f7d\u5931\u8d25');
+    expect(markup).toContain('aria-label="重试加载历史K线"');
+  });
 });

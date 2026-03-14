@@ -85,7 +85,7 @@ export class BinanceAdapter implements ExchangeAdapter {
         volume: parseFloat(item[5]),
         quote_volume: parseFloat(item[7]),
         trades_count: item[8],
-        is_closed: 1,
+        is_closed: resolveBinanceRestKlineClosedState(item[6]),
       }));
     } catch (error: any) {
       console.error('Binance getKlines error:', error.message);
@@ -341,4 +341,8 @@ export class BinanceAdapter implements ExchangeAdapter {
       }
     };
   }
+}
+
+function resolveBinanceRestKlineClosedState(closeTime: number): number {
+  return Date.now() > Number(closeTime) ? 1 : 0;
 }

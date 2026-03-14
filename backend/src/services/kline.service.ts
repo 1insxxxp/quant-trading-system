@@ -40,8 +40,16 @@ export class KlineService {
     if (before === undefined) {
       const redisKlines = await redisCache.getKlines(exchange, symbol, interval, requestLimit);
       if (redisKlines && redisKlines.length >= requestLimit) {
+        const hydratedRedisKlines = await this.hydrateInitialWindowWithLatestTail(
+          exchange,
+          symbol,
+          interval,
+          redisKlines,
+          requestLimit,
+        );
+        void redisCache.setKlines(exchange, symbol, interval, hydratedRedisKlines).catch(() => {});
         return {
-          klines: redisKlines.slice(-limit),
+          klines: hydratedRedisKlines.slice(-limit),
           source: 'cache',
           hasMore: true,
         };
@@ -54,15 +62,23 @@ export class KlineService {
     const dbWindowNeedsRemoteRepair = cleanedDbResult.length > 0 && hasWindowIntegrityIssues(cleanedDbResult, interval);
 
     if (cleanedDbResult.length >= requestLimit && !dbWindowNeedsRemoteRepair) {
-      const syncState = await db.getKlineSyncState(exchange, symbol, interval).catch(() => null);
+      const hydratedDbKlines = before === undefined
+        ? await this.hydrateInitialWindowWithLatestTail(
+          exchange,
+          symbol,
+          interval,
+          cleanedDbResult,
+          requestLimit,
+        )
+        : cleanedDbResult;
       // DB 命中时异步回写 Redis，避免 TTL 过期后每次都穿透到 DB
       if (before === undefined) {
-        void redisCache.setKlines(exchange, symbol, interval, cleanedDbResult).catch(() => {});
+        void redisCache.setKlines(exchange, symbol, interval, hydratedDbKlines).catch(() => {});
       }
       return {
-        klines: cleanedDbResult.slice(-limit),
+        klines: hydratedDbKlines.slice(-limit),
         source: 'cache',
-        hasMore: syncState?.has_more_history ?? true,
+        hasMore: true,
       };
     }
 
@@ -113,7 +129,10 @@ export class KlineService {
       const klines = normalizeKlines(
         await db.getKlines(exchange, symbol, interval, limit, before) as Kline[],
       );
-      return klines.length > 0 ? klines : null;
+      const filteredKlines = typeof before === 'number'
+        ? klines.filter((kline) => kline.open_time < before)
+        : klines;
+      return filteredKlines.length > 0 ? filteredKlines : null;
     } catch (error: any) {
       console.debug(`DB query failed for ${exchange}:${symbol}:${interval}: ${error.message}`);
       return null;
@@ -135,9 +154,12 @@ export class KlineService {
       }
 
       const remoteKlines = await this.fetchPagedRemoteKlines(adapter, symbol, interval, limit, before);
+      const filteredKlines = typeof before === 'number'
+        ? remoteKlines.filter((kline) => kline.open_time < before)
+        : remoteKlines;
       return {
-        klines: remoteKlines,
-        hasMore: remoteKlines.length >= limit,
+        klines: filteredKlines,
+        hasMore: filteredKlines.length >= limit,
       };
     } catch (error: any) {
       console.error(`Remote query failed for ${exchange}:${symbol}:${interval}: ${error.message}`);
@@ -195,13 +217,19 @@ export class KlineService {
     try {
       const klines = await db.getKlines(exchange, symbol, interval, 1) as Kline[];
       const latestCached = klines[0] ?? null;
+      const latestCachedIsCurrentBucket = Boolean(
+        latestCached && latestCached.open_time >= currentIntervalOpenTime,
+      );
+      const latestCachedNeedsRefresh = Boolean(
+        latestCachedIsCurrentBucket &&
+        latestCached?.is_closed === 1
+      );
 
-      if (latestCached && latestCached.open_time >= currentIntervalOpenTime) {
+      if (latestCachedIsCurrentBucket && !latestCachedNeedsRefresh) {
         return latestCached;
       }
 
-      const remoteResult = await this.queryKlinesFromRemote(exchange, symbol, interval, 2);
-      const latestRemote = remoteResult?.klines[remoteResult.klines.length - 1] ?? null;
+      const latestRemote = await this.fetchLatestRemoteKline(exchange, symbol, interval);
 
       if (latestRemote) {
         void this.saveKline(latestRemote).catch(() => {});
@@ -211,8 +239,45 @@ export class KlineService {
       return latestCached;
     } catch (error: any) {
       console.warn(`DB unavailable for latest cached kline ${exchange}:${symbol}:${interval}: ${error.message}`);
-      return null;
+      return this.fetchLatestRemoteKline(exchange, symbol, interval);
     }
+  }
+
+  private async hydrateInitialWindowWithLatestTail(
+    exchange: string,
+    symbol: string,
+    interval: string,
+    klines: Kline[],
+    limit: number,
+  ): Promise<Kline[]> {
+    if (klines.length === 0) {
+      return klines;
+    }
+
+    const latestTail = await this.getLatestCachedKline(exchange, symbol, interval);
+    if (!latestTail) {
+      return sanitizeKlineWindow(normalizeKlines(klines), interval).slice(-limit);
+    }
+
+    return sanitizeKlineWindow(
+      normalizeKlines([...klines, latestTail]),
+      interval,
+    ).slice(-limit);
+  }
+
+  private async fetchLatestRemoteKline(
+    exchange: string,
+    symbol: string,
+    interval: string,
+  ): Promise<Kline | null> {
+    const remoteResult = await this.queryKlinesFromRemote(exchange, symbol, interval, 2);
+    const latestRemote = remoteResult?.klines[remoteResult.klines.length - 1] ?? null;
+
+    if (latestRemote) {
+      void this.saveKline(latestRemote).catch(() => {});
+    }
+
+    return latestRemote;
   }
 
   async recoverGapKlines(
@@ -304,11 +369,40 @@ export class KlineService {
     limit: number,
     before?: number,
   ): Promise<Kline[]> {
-    const page = normalizeKlines(
-      await adapter.getKlines(symbol, interval, limit, before),
-    );
+    let accumulatedKlines: Kline[] = [];
+    let cursor = before;
+    let previousCursor: number | undefined;
 
-    return page;
+    while (countUsableKlines(accumulatedKlines, before) < limit) {
+      const remaining = limit - countUsableKlines(accumulatedKlines, before);
+      const page = normalizeKlines(
+        await adapter.getKlines(symbol, interval, remaining, cursor),
+      );
+
+      if (page.length === 0) {
+        break;
+      }
+
+      accumulatedKlines = normalizeKlines([...page, ...accumulatedKlines]);
+
+      if (countUsableKlines(accumulatedKlines, before) >= limit) {
+        break;
+      }
+
+      const oldestOpenTime = page[0]?.open_time;
+      if (
+        typeof oldestOpenTime !== 'number' ||
+        oldestOpenTime === previousCursor ||
+        (typeof cursor === 'number' && oldestOpenTime >= cursor)
+      ) {
+        break;
+      }
+
+      previousCursor = cursor;
+      cursor = oldestOpenTime - 1;
+    }
+
+    return accumulatedKlines;
   }
 }
 
@@ -388,4 +482,12 @@ function getIntervalMs(interval: string): number {
 function floorToInterval(timestamp: number, interval: string): number {
   const intervalMs = getIntervalMs(interval);
   return Math.floor(timestamp / intervalMs) * intervalMs;
+}
+
+function countUsableKlines(klines: Kline[], before?: number): number {
+  if (typeof before !== 'number') {
+    return klines.length;
+  }
+
+  return klines.filter((kline) => kline.open_time < before).length;
 }

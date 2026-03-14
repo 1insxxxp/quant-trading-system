@@ -75,13 +75,14 @@ export class OKXAdapter implements ExchangeAdapter {
 
       return response.data.data.map((item: string[]) => {
         const openTime = Number(item[0]);
+        const closeTime = openTime + this.getIntervalMs(interval);
 
         return {
           exchange: 'okx',
           symbol: symbol.toUpperCase(),
           interval,
           open_time: openTime,
-          close_time: openTime + this.getIntervalMs(interval),
+          close_time: closeTime,
           open: parseFloat(item[1]),
           high: parseFloat(item[2]),
           low: parseFloat(item[3]),
@@ -89,7 +90,7 @@ export class OKXAdapter implements ExchangeAdapter {
           volume: parseFloat(item[5]),
           quote_volume: parseFloat(item[6]),
           trades_count: undefined,
-          is_closed: 1,
+          is_closed: resolveOkxRestKlineClosedState(item, closeTime),
         };
       });
     } catch (error: any) {
@@ -409,4 +410,18 @@ export class OKXAdapter implements ExchangeAdapter {
 
     return map[interval] || 60 * 60 * 1000;
   }
+}
+
+function resolveOkxRestKlineClosedState(item: string[], closeTime: number): number {
+  const confirm = item[8];
+
+  if (confirm === '1') {
+    return 1;
+  }
+
+  if (confirm === '0') {
+    return 0;
+  }
+
+  return Date.now() > closeTime ? 1 : 0;
 }

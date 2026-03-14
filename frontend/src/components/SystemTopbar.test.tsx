@@ -81,14 +81,10 @@ describe('SystemTopbar', () => {
     expect(markup).toContain('\u6536\u8d77\u4fa7\u8fb9\u680f');
     expect(markup).toContain('aria-label="\u8fde\u63a5\u5728\u7ebf"');
     expect(markup).toContain('signal-light');
-    expect(markup).toContain('\u7cfb\u7edf\u65f6\u95f4');
-    expect(markup).toContain('2026-03-09 23:16:17');
-    expect(markup).toContain('aria-label="\u5207\u6362\u5230\u4eae\u8272\u4e3b\u9898"');
-    expect(markup).toContain('system-topbar__utilities');
-    expect(markup).toContain('system-topbar__utility-strip');
-    expect(markup).toContain('system-topbar__status-dot');
-    expect(markup).toContain('rolling-digits--clock');
-    expect(markup).toContain('topbar-market-controls');
+    expect(markup).toContain('system-topbar__price-section');
+    expect(markup).toContain('system-topbar__controls');
+    expect(markup).toContain('system-topbar__status');
+    expect(markup).toContain('rolling-digits');
     expect(markup).toContain('data-testid="topbar-exchange-select-trigger"');
     expect(markup).toContain('data-testid="topbar-symbol-select-trigger"');
     expect(markup).not.toContain('\\u');

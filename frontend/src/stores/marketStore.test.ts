@@ -624,6 +624,43 @@ describe('marketStore', () => {
     expect((useMarketStore.getState() as any).isLoadingSymbols).toBe(false);
   });
 
+  it('keeps loaded klines when fetched symbols still contain the active symbol', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        json: async () => ({
+          success: true,
+          symbols: [
+            { exchange: 'binance', symbol: 'BTCUSDT', base_asset: 'BTC', quote_asset: 'USDT', type: 'spot' },
+            { exchange: 'binance', symbol: 'ETHUSDT', base_asset: 'ETH', quote_asset: 'USDT', type: 'spot' },
+          ],
+        }),
+      }) as Response) as typeof fetch,
+    );
+
+    const existingKlines = [
+      makeKline({ symbol: 'ETHUSDT', open_time: 100, close_time: 101, close: 2100 }),
+      makeKline({ symbol: 'ETHUSDT', open_time: 200, close_time: 201, close: 2200 }),
+    ];
+
+    useMarketStore.setState({
+      exchange: 'binance',
+      symbol: 'ETHUSDT',
+      klines: existingKlines,
+      klineSource: 'remote',
+      latestPrice: 2200,
+      isLoadingKlines: false,
+    });
+
+    await (useMarketStore.getState() as any).fetchSymbols();
+
+    expect(useMarketStore.getState().symbol).toBe('ETHUSDT');
+    expect(useMarketStore.getState().klines).toEqual(existingKlines);
+    expect(useMarketStore.getState().klineSource).toBe('remote');
+    expect(useMarketStore.getState().latestPrice).toBe(2200);
+    expect(useMarketStore.getState().isLoadingKlines).toBe(false);
+  });
+
   it('replaces the active symbol when the fetched list no longer contains it', async () => {
     vi.stubGlobal(
       'fetch',

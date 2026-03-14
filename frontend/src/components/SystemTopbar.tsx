@@ -1,11 +1,10 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect } from 'react';
 import { formatLivePrice, formatMarketSymbol } from '../lib/marketDisplay';
 import { useMarketStore } from '../stores/marketStore';
 import { useUiStore } from '../stores/uiStore';
 import { ExchangeIcon, AssetIcon } from './marketIcons';
 import { MarketSelect, type MarketSelectOption } from './MarketSelect';
-
-const DIGIT_TRACK = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
+import { RollingDigits } from './RollingDigits';
 const EXCHANGES = [
   { value: 'binance', label: 'Binance' },
   { value: 'okx', label: 'OKX' },
@@ -38,41 +37,6 @@ function resolvePriceTone(params: {
 
   return 'flat';
 }
-
-function RollingDigits({ value, className }: { value: string; className?: string }) {
-  const characters = useMemo(() => Array.from(value), [value]);
-
-  return (
-    <span className={['rolling-digits', className].filter(Boolean).join(' ')} aria-label={value}>
-      <span className="rolling-digits__raw">{value}</span>
-      {characters.map((char, index) => {
-        if (!/[0-9]/.test(char)) {
-          return (
-            <span key={`sep-${index}-${char}`} className="rolling-digits__separator" aria-hidden="true">
-              {char}
-            </span>
-          );
-        }
-
-        return (
-          <span key={`digit-${index}`} className="rolling-digits__digit" aria-hidden="true">
-            <span
-              className="rolling-digits__track"
-              style={{ '--digit-target': Number(char) } as React.CSSProperties}
-            >
-              {DIGIT_TRACK.map((digit) => (
-                <span key={`${index}-${digit}`} className="rolling-digits__cell">
-                  {digit}
-                </span>
-              ))}
-            </span>
-          </span>
-        );
-      })}
-    </span>
-  );
-}
-
 export const SystemTopbar: React.FC = () => {
   const isSidebarCollapsed = useUiStore((state) => state.isSidebarCollapsed);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);

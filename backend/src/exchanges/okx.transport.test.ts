@@ -154,6 +154,32 @@ describe('OKXAdapter transport routing', () => {
     );
   });
 
+  it('marks the latest REST kline as open when its close time is still in the future', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-14T03:00:00.000Z'));
+
+    const httpGet = vi.fn().mockResolvedValue({
+      data: {
+        data: [
+          ['1773432000000', '2102.48', '2116.66', '2078.50', '2092.22', '41870.803', '87696290.63409'],
+          ['1773446400000', '2092.21', '2095.91', '2081.39', '2093.17', '23283.2213', '48655675.581107'],
+        ],
+      },
+    });
+    const adapter = new OKXAdapter({
+      transportConfig: createExchangeTransportConfig(),
+      httpGet,
+      WebSocketCtor: FakeWebSocket as never,
+    });
+
+    const result = await adapter.getKlines('ETHUSDT', '4h', 2);
+
+    expect(result[0]?.is_closed).toBe(1);
+    expect(result[1]?.is_closed).toBe(0);
+
+    vi.useRealTimers();
+  });
+
   it('reconnects after an established socket closes unexpectedly', async () => {
     vi.useFakeTimers();
     FakeWebSocket.calls = [];

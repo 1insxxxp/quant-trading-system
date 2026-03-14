@@ -3,25 +3,33 @@ import {
   createChart,
   type CandlestickData,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
+  LineStyle,
   type MouseEventParams,
   type Time,
 } from 'lightweight-charts';
 import { formatMarketSymbol } from '../lib/marketDisplay';
 import {
+  formatChartCountdown,
   formatChartCrosshairTime,
   formatChartIntervalLabel,
   formatChartVolumeLegendValue,
+  resolveCurrentCandleCountdownLabel,
   resolveTimestampFromChartTime,
 } from '../lib/chartTimeFormat';
 import { useMarketStore } from '../stores/marketStore';
 import { type ThemeMode, useUiStore } from '../stores/uiStore';
 import { ChartInspector, type ChartInspectorSnapshot } from './ChartInspector';
+import { RollingDigits } from './RollingDigits';
 import { Toolbar } from './Toolbar';
 import {
   buildCandlestickData,
+  isNearHistoryLoadEdge,
   resolveChartUpdateMode,
+  resolveVisibleRangeAfterPrepend,
   shouldLoadOlderKlines,
+  shouldShowDetachedRealtimePriceLine,
 } from './klineChartData';
 import { buildIndicatorLegend, syncIndicatorSeries } from './klineChartIndicators';
 import type { Kline } from '../types';
@@ -30,20 +38,35 @@ const MIN_CHART_HEIGHT = 460;
 const MIN_DEFAULT_VISIBLE_BARS = 80;
 const DEFAULT_RIGHT_PADDING_BARS = 6;
 const LOADING_SIGNAL_BARS = Array.from({ length: 12 }, (_, index) => index);
+const DETACHED_REALTIME_BADGE_HALF_HEIGHT = 20;
+const DETACHED_REALTIME_BADGE_SAFE_MARGIN = 14;
+
+interface DetachedRealtimeBadgeState {
+  top: number;
+  priceLabel: string;
+  countdownLabel: string;
+  tone: 'up' | 'down';
+}
 
 export const KlineChart: React.FC = () => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const realtimePriceLineRef = useRef<IPriceLine | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const ma5SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const ma10SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const ma20SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const chartDataRef = useRef<CandlestickData[]>([]);
+  const latestPriceRef = useRef<number | null>(null);
+  const latestKlineRef = useRef<Kline | null>(null);
+  const visibleLogicalRangeRef = useRef<{ from: number; to: number } | null>(null);
+  const themeRef = useRef<ThemeMode>('dark');
   const previousDataRef = useRef<CandlestickData[]>([]);
   const previousMarketKeyRef = useRef<string | null>(null);
   const isHistoryPagingReadyRef = useRef(false);
-  const historyPagingArmFrameRef = useRef<number | null>(null);
   const [hoveredKline, setHoveredKline] = useState<Kline | null>(null);
+  const [detachedRealtimeBadge, setDetachedRealtimeBadge] = useState<DetachedRealtimeBadgeState | null>(null);
   const theme = useUiStore((state) => state.theme);
   const isCrosshairMagnetEnabled = useUiStore((state) => state.isCrosshairMagnetEnabled);
 
@@ -55,10 +78,108 @@ export const KlineChart: React.FC = () => {
     isLoadingKlines,
     isLoadingOlderKlines,
     olderKlineLoadError,
+    latestPrice,
     indicatorSettings,
     updateIndicatorSetting,
     retryLoadOlderKlines,
   } = useMarketStore();
+
+  themeRef.current = theme;
+  latestPriceRef.current = latestPrice;
+  latestKlineRef.current = klines[klines.length - 1] ?? null;
+
+  const syncDetachedRealtimePriceLine = React.useCallback((visibleToOverride?: number | null) => {
+    const candleSeries = candleSeriesRef.current;
+    if (!candleSeries) {
+      return;
+    }
+
+    const data = chartDataRef.current;
+    const latestLogicalIndex = data.length > 0 ? data.length - 1 : null;
+    const visibleTo = visibleToOverride
+      ?? visibleLogicalRangeRef.current?.to
+      ?? chartRef.current?.timeScale().getVisibleLogicalRange()?.to;
+
+    const shouldShow = shouldShowDetachedRealtimePriceLine({
+      latestPrice: latestPriceRef.current,
+      latestLogicalIndex,
+      visibleTo,
+    });
+
+    if (!shouldShow || typeof latestPriceRef.current !== 'number') {
+      if (realtimePriceLineRef.current) {
+        candleSeries.removePriceLine(realtimePriceLineRef.current);
+        realtimePriceLineRef.current = null;
+      }
+      setDetachedRealtimeBadge((current) => (current ? null : current));
+      return;
+    }
+
+    const currentTheme = getChartTheme(themeRef.current);
+    const latestKline = latestKlineRef.current;
+    const isUp = latestKline ? latestPriceRef.current >= latestKline.open : true;
+    const tone = isUp ? 'up' : 'down';
+    const lineColor = tone === 'up' ? currentTheme.candleUpColor : currentTheme.candleDownColor;
+    const priceCoordinate = candleSeries.priceToCoordinate(latestPriceRef.current);
+    const containerHeight = chartContainerRef.current?.clientHeight ?? 0;
+    const countdownLabel = resolveCurrentCandleCountdownLabel({
+      interval,
+      latestKline,
+    }) ?? formatChartCountdown(0);
+
+    if (priceCoordinate === null || containerHeight <= 0) {
+      setDetachedRealtimeBadge((current) => (current ? null : current));
+      return;
+    }
+
+    const clampedTop = clampNumber(
+      Number(priceCoordinate),
+      DETACHED_REALTIME_BADGE_SAFE_MARGIN + DETACHED_REALTIME_BADGE_HALF_HEIGHT,
+      Math.max(
+        DETACHED_REALTIME_BADGE_SAFE_MARGIN + DETACHED_REALTIME_BADGE_HALF_HEIGHT,
+        containerHeight - DETACHED_REALTIME_BADGE_SAFE_MARGIN - DETACHED_REALTIME_BADGE_HALF_HEIGHT,
+      ),
+    );
+    const nextBadge: DetachedRealtimeBadgeState = {
+      top: clampedTop,
+      priceLabel: formatPriceLabel(latestPriceRef.current),
+      countdownLabel,
+      tone,
+    };
+    setDetachedRealtimeBadge((current) => {
+      if (
+        current &&
+        current.top === nextBadge.top &&
+        current.priceLabel === nextBadge.priceLabel &&
+        current.countdownLabel === nextBadge.countdownLabel &&
+        current.tone === nextBadge.tone
+      ) {
+        return current;
+      }
+
+      return nextBadge;
+    });
+
+    const options = {
+      id: 'detached-realtime-price',
+      price: latestPriceRef.current,
+      color: lineColor,
+      lineWidth: 1 as const,
+      lineStyle: LineStyle.Dashed,
+      lineVisible: true,
+      axisLabelVisible: false,
+      axisLabelColor: lineColor,
+      axisLabelTextColor: themeRef.current === 'light' ? '#f8fbff' : '#07101d',
+      title: '',
+    };
+
+    if (realtimePriceLineRef.current) {
+      realtimePriceLineRef.current.applyOptions(options);
+      return;
+    }
+
+    realtimePriceLineRef.current = candleSeries.createPriceLine(options);
+  }, [interval]);
 
   useEffect(() => {
     if (!chartContainerRef.current) {
@@ -144,6 +265,8 @@ export const KlineChart: React.FC = () => {
     previousDataRef.current = [];
     previousMarketKeyRef.current = null;
     isHistoryPagingReadyRef.current = false;
+    chartDataRef.current = [];
+    visibleLogicalRangeRef.current = null;
 
     const resizeChart = () => {
       if (chartContainerRef.current) {
@@ -151,6 +274,7 @@ export const KlineChart: React.FC = () => {
           width: chartContainerRef.current.clientWidth,
           height: Math.max(chartContainerRef.current.clientHeight, MIN_CHART_HEIGHT),
         });
+        syncDetachedRealtimePriceLine();
       }
     };
 
@@ -164,6 +288,7 @@ export const KlineChart: React.FC = () => {
     window.addEventListener('resize', resizeChart);
 
     const handleVisibleRangeChange = (range: { from: number; to: number } | null) => {
+      visibleLogicalRangeRef.current = range;
       const state = useMarketStore.getState();
       const shouldLoad = shouldLoadOlderKlines({
         visibleFrom: range?.from,
@@ -176,6 +301,8 @@ export const KlineChart: React.FC = () => {
       if (shouldLoad) {
         void state.loadOlderKlines();
       }
+
+      syncDetachedRealtimePriceLine(range?.to);
     };
 
     const handleVisibleTimeRangeChange = () => {
@@ -199,12 +326,16 @@ export const KlineChart: React.FC = () => {
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange as never);
       chart.timeScale().unsubscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange as never);
       chart.unsubscribeCrosshairMove(handleCrosshairMove);
-      if (historyPagingArmFrameRef.current !== null) {
-        window.cancelAnimationFrame(historyPagingArmFrameRef.current);
-      }
       isHistoryPagingReadyRef.current = false;
       previousDataRef.current = [];
       previousMarketKeyRef.current = null;
+      chartDataRef.current = [];
+      visibleLogicalRangeRef.current = null;
+      setDetachedRealtimeBadge(null);
+      if (realtimePriceLineRef.current && candleSeriesRef.current) {
+        candleSeriesRef.current.removePriceLine(realtimePriceLineRef.current);
+        realtimePriceLineRef.current = null;
+      }
       chart.remove();
     };
   }, []);
@@ -241,6 +372,7 @@ export const KlineChart: React.FC = () => {
     ma5SeriesRef.current?.applyOptions({ color: nextTheme.ma5Color });
     ma10SeriesRef.current?.applyOptions({ color: nextTheme.ma10Color });
     ma20SeriesRef.current?.applyOptions({ color: nextTheme.ma20Color });
+    syncDetachedRealtimePriceLine();
   }, [theme, isCrosshairMagnetEnabled]);
 
   useEffect(() => {
@@ -267,11 +399,14 @@ export const KlineChart: React.FC = () => {
         previousDataRef.current = [];
         previousMarketKeyRef.current = marketKey;
         isHistoryPagingReadyRef.current = false;
+        chartDataRef.current = [];
+        syncDetachedRealtimePriceLine();
       }
       return;
     }
 
     const data = buildCandlestickData(klines);
+    chartDataRef.current = data;
     const previousData = previousDataRef.current;
     const nextLast = data[data.length - 1];
 
@@ -289,9 +424,6 @@ export const KlineChart: React.FC = () => {
 
     if (updateMode === 'replace') {
       isHistoryPagingReadyRef.current = false;
-      if (historyPagingArmFrameRef.current !== null) {
-        window.cancelAnimationFrame(historyPagingArmFrameRef.current);
-      }
 
       candleSeriesRef.current.setData(data);
 
@@ -306,14 +438,16 @@ export const KlineChart: React.FC = () => {
     } else if (updateMode === 'prepend') {
       const visibleRange = chartRef.current?.timeScale().getVisibleLogicalRange();
       const prependedCount = data.length - previousData.length;
+      const nextVisibleRange = resolveVisibleRangeAfterPrepend({
+        visibleRange,
+        prependedCount,
+        keepPinnedToLeftEdge: isNearHistoryLoadEdge(visibleRange?.from),
+      });
 
       candleSeriesRef.current.setData(data);
 
-      if (visibleRange && chartRef.current) {
-        chartRef.current.timeScale().setVisibleLogicalRange({
-          from: visibleRange.from + prependedCount,
-          to: visibleRange.to + prependedCount,
-        });
+      if (nextVisibleRange && chartRef.current) {
+        chartRef.current.timeScale().setVisibleLogicalRange(nextVisibleRange);
       }
     } else if (updateMode === 'repair') {
       const visibleRange = chartRef.current?.timeScale().getVisibleLogicalRange();
@@ -367,7 +501,22 @@ export const KlineChart: React.FC = () => {
 
     previousDataRef.current = data;
     previousMarketKeyRef.current = marketKey;
+    syncDetachedRealtimePriceLine();
   }, [klines, exchange, symbol, interval, indicatorSettings]);
+
+  useEffect(() => {
+    syncDetachedRealtimePriceLine();
+  }, [latestPrice]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      syncDetachedRealtimePriceLine();
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [syncDetachedRealtimePriceLine]);
 
   useEffect(() => {
     setHoveredKline(null);
@@ -424,27 +573,44 @@ export const KlineChart: React.FC = () => {
             ) : null}
 
             {isLoadingOlderKlines ? (
-              <div className="chart-history-loading" role="status" aria-live="polite">
-                <span className="chart-history-loading__signal" aria-hidden="true">
-                  {Array.from({ length: 6 }, (_, index) => (
-                    <span key={index} className="chart-history-loading__bar" />
+              <div
+                className="chart-history-edge chart-history-edge--loading"
+                role="status"
+                aria-live="polite"
+                aria-label="正在加载更多历史K线"
+              >
+                <span className="chart-history-edge__rail" aria-hidden="true">
+                  {Array.from({ length: 8 }, (_, index) => (
+                    <span key={index} className="chart-history-edge__beam" />
                   ))}
+                </span>
+                <span className="chart-history-edge__meta">
+                  <span className="chart-history-edge__label">{'加载历史'}</span>
                 </span>
               </div>
             ) : null}
 
             {!isLoadingOlderKlines && olderKlineLoadError ? (
-              <div className="chart-history-status chart-history-status--error" role="alert" aria-live="assertive">
-                <span>{olderKlineLoadError}</span>
-                <button
-                  type="button"
-                  className="chart-history-status__retry"
-                  onClick={() => {
-                    void retryLoadOlderKlines();
-                  }}
-                >
-                  {'重试'}
-                </button>
+              <div className="chart-history-edge chart-history-edge--error" role="alert" aria-live="assertive">
+                <span className="chart-history-edge__rail chart-history-edge__rail--error" aria-hidden="true">
+                  {Array.from({ length: 6 }, (_, index) => (
+                    <span key={index} className="chart-history-edge__beam chart-history-edge__beam--error" />
+                  ))}
+                </span>
+                <span className="chart-history-edge__meta">
+                  <span className="chart-history-edge__label chart-history-edge__label--error">{'加载失败'}</span>
+                  <button
+                    type="button"
+                    className="chart-history-edge__retry"
+                    aria-label="重试加载历史K线"
+                    title={olderKlineLoadError}
+                    onClick={() => {
+                      void retryLoadOlderKlines();
+                    }}
+                  >
+                    重试
+                  </button>
+                </span>
               </div>
             ) : null}
           </>
@@ -455,6 +621,27 @@ export const KlineChart: React.FC = () => {
           data-testid="kline-chart"
           className={`chart-canvas ${isLoadingKlines ? 'chart-canvas--dimmed' : ''}`}
         />
+
+        {detachedRealtimeBadge ? (
+          <div
+            className={`chart-realtime-badge chart-realtime-badge--${detachedRealtimeBadge.tone}`}
+            style={{ top: `${detachedRealtimeBadge.top}px` }}
+            aria-live="polite"
+          >
+            <strong className="chart-realtime-badge__price">
+              <RollingDigits
+                value={detachedRealtimeBadge.priceLabel}
+                className="chart-realtime-badge__digits"
+              />
+            </strong>
+            <span className="chart-realtime-badge__countdown">
+              <RollingDigits
+                value={detachedRealtimeBadge.countdownLabel}
+                className="chart-realtime-badge__digits rolling-digits--clock chart-realtime-badge__digits--countdown"
+              />
+            </span>
+          </div>
+        ) : null}
 
         {isLoadingKlines ? (
           <div className="chart-overlay chart-overlay--loading">
@@ -549,4 +736,15 @@ function resolveKlineFromCrosshair(params: {
   }
 
   return klines.find((item) => item.open_time === hoveredTimestamp) ?? klines[klines.length - 1] ?? null;
+}
+
+function formatPriceLabel(value: number): string {
+  return value.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }

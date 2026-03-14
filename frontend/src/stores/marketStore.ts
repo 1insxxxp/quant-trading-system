@@ -29,8 +29,8 @@ const DEFAULT_MARKET_SELECTION = {
   symbol: 'BTCUSDT',
   interval: '1h',
 } as const;
-const INITIAL_KLINE_LIMIT = 1000;
-const OLDER_KLINE_PAGE_SIZE = 500;
+const INITIAL_KLINE_LIMIT = 2000;
+const OLDER_KLINE_PAGE_SIZE = 1000;
 const DEFAULT_OLDER_KLINE_LOAD_ERROR = '加载历史K线失败，请重试。';
 
 interface BackendSymbol {
@@ -287,11 +287,55 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         return;
       }
 
+      let initialKlines = normalizeKlines(initialResult.klines ?? []);
+      let hasMoreHistory = initialResult.hasMore ?? false;
+
+      while (
+        initialKlines.length > 0 &&
+        initialKlines.length < INITIAL_KLINE_LIMIT &&
+        hasMoreHistory
+      ) {
+        const oldestOpenTime = initialKlines[0]?.open_time;
+        if (typeof oldestOpenTime !== 'number') {
+          break;
+        }
+
+        const olderResult = await fetchKlinePage({
+          exchange,
+          symbol,
+          interval,
+          limit: INITIAL_KLINE_LIMIT - initialKlines.length,
+          before: oldestOpenTime,
+        });
+
+        if (isStaleInitialRequest(fetchToken, marketKey, get)) {
+          return;
+        }
+
+        if (!olderResult.success) {
+          break;
+        }
+
+        const olderKlines = normalizeKlines(olderResult.klines ?? []);
+        if (olderKlines.length === 0) {
+          hasMoreHistory = false;
+          break;
+        }
+
+        const nextInitialKlines = normalizeKlines([...olderKlines, ...initialKlines]);
+        if (nextInitialKlines.length === initialKlines.length) {
+          hasMoreHistory = false;
+          break;
+        }
+
+        initialKlines = nextInitialKlines;
+        hasMoreHistory = olderResult.hasMore ?? false;
+      }
+
       const bufferedRealtimeKlines = getMarketKey(get().exchange, get().symbol, get().interval) === marketKey
         ? get().klines
         : [];
-      const nextKlines = normalizeKlines([...(initialResult.klines ?? []), ...bufferedRealtimeKlines]);
-      const hasMoreHistory = initialResult.hasMore ?? false;
+      const nextKlines = normalizeKlines([...initialKlines, ...bufferedRealtimeKlines]);
       const source = resolveKlineSource(initialResult.source, nextKlines);
       set({
         klines: nextKlines,
@@ -614,6 +658,15 @@ function applySymbolOptions(
   const hasCurrentSymbol = resolvedSymbols.some((item) => item.value === currentSymbol);
   const resolvedSymbol = hasCurrentSymbol ? currentSymbol : resolvedSymbols[0].value;
 
+  if (resolvedSymbol === currentSymbol) {
+    set({
+      symbols: resolvedSymbols,
+      symbol: resolvedSymbol,
+      isLoadingSymbols: false,
+    });
+    return resolvedSymbol;
+  }
+
   set({
     symbols: resolvedSymbols,
     symbol: resolvedSymbol,
@@ -621,9 +674,9 @@ function applySymbolOptions(
     klines: [],
     klineSource: 'empty',
     olderKlineLoadError: null,
-    ...(resolvedSymbol !== currentSymbol
-      ? { latestPrice: null, lastPriceTimestamp: null, isLoadingKlines: true }
-      : {}),
+    latestPrice: null,
+    lastPriceTimestamp: null,
+    isLoadingKlines: true,
   });
 
   return resolvedSymbol;
