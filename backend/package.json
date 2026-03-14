@@ -12,6 +12,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "migrate:sqlite-to-postgres": "tsx scripts/migrate-sqlite-to-postgres.ts",
+    "migrate": "tsx scripts/run-migrations.ts",
     "test": "vitest",
     "test:coverage": "vitest --coverage"
   },

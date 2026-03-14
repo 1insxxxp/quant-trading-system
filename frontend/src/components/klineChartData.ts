@@ -13,13 +13,49 @@ export function buildCandlestickData(klines: Kline[]): CandlestickData[] {
       deduped.set(kline.open_time, kline);
     });
 
-  return [...deduped.values()].map((kline) => ({
-    time: (kline.open_time / 1000) as CandlestickData['time'],
-    open: kline.open,
-    high: kline.high,
-    low: kline.low,
-    close: kline.close,
-  }));
+  const normalized = [...deduped.values()];
+
+  if (normalized.length <= 1) {
+    return normalized.map((kline) => ({
+      time: (kline.open_time / 1000) as CandlestickData['time'],
+      open: kline.open,
+      high: kline.high,
+      low: kline.low,
+      close: kline.close,
+    }));
+  }
+
+  const intervalMs = resolveIntervalMs(normalized);
+  const filled: CandlestickData[] = [];
+
+  normalized.forEach((kline, index) => {
+    filled.push({
+      time: (kline.open_time / 1000) as CandlestickData['time'],
+      open: kline.open,
+      high: kline.high,
+      low: kline.low,
+      close: kline.close,
+    });
+
+    const next = normalized[index + 1];
+    if (!next || intervalMs <= 0) {
+      return;
+    }
+
+    let cursor = kline.open_time + intervalMs;
+    while (cursor < next.open_time) {
+      filled.push({
+        time: (cursor / 1000) as CandlestickData['time'],
+        open: kline.close,
+        high: kline.close,
+        low: kline.close,
+        close: kline.close,
+      });
+      cursor += intervalMs;
+    }
+  });
+
+  return filled;
 }
 
 export function resolveChartUpdateMode(params: {
@@ -170,4 +206,23 @@ function isSameCandlestickPoint(
     left.low === right.low &&
     left.close === right.close
   );
+}
+
+function resolveIntervalMs(klines: Kline[]): number {
+  const fromWindow = klines[0]
+    ? Math.max(0, (klines[0].close_time - klines[0].open_time) + 1)
+    : 0;
+
+  if (fromWindow > 0) {
+    return fromWindow;
+  }
+
+  for (let index = 1; index < klines.length; index += 1) {
+    const gap = klines[index].open_time - klines[index - 1].open_time;
+    if (gap > 0) {
+      return gap;
+    }
+  }
+
+  return 0;
 }

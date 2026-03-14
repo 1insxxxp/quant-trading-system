@@ -249,22 +249,25 @@ export const KlineChart: React.FC = () => {
     }
 
     const marketKey = `${exchange}:${symbol}:${interval}`;
+    const isMarketChange = previousMarketKeyRef.current !== marketKey;
 
     if (klines.length === 0) {
-      candleSeriesRef.current.setData([]);
-      syncIndicatorSeries({
-        klines: [],
-        settings: indicatorSettings,
-        series: {
-          volume: volumeSeriesRef.current,
-          ma5: ma5SeriesRef.current,
-          ma10: ma10SeriesRef.current,
-          ma20: ma20SeriesRef.current,
-        },
-      });
-      previousDataRef.current = [];
-      previousMarketKeyRef.current = marketKey;
-      isHistoryPagingReadyRef.current = false;
+      if (isMarketChange) {
+        candleSeriesRef.current.setData([]);
+        syncIndicatorSeries({
+          klines: [],
+          settings: indicatorSettings,
+          series: {
+            volume: volumeSeriesRef.current,
+            ma5: ma5SeriesRef.current,
+            ma10: ma10SeriesRef.current,
+            ma20: ma20SeriesRef.current,
+          },
+        });
+        previousDataRef.current = [];
+        previousMarketKeyRef.current = marketKey;
+        isHistoryPagingReadyRef.current = false;
+      }
       return;
     }
 
@@ -272,9 +275,7 @@ export const KlineChart: React.FC = () => {
     const previousData = previousDataRef.current;
     const nextLast = data[data.length - 1];
 
-    // Force replace mode on initial load, market change, or when data size grows significantly
     const isInitialLoad = previousData.length === 0;
-    const isMarketChange = previousMarketKeyRef.current !== marketKey;
     const isSignificantDataGrowth = data.length >= 50 && previousData.length < 50;
 
     const updateMode = isInitialLoad || isMarketChange || isSignificantDataGrowth
@@ -294,7 +295,6 @@ export const KlineChart: React.FC = () => {
 
       candleSeriesRef.current.setData(data);
 
-      // Set explicit visible range to show the latest bars
       const visibleBars = Math.min(data.length, MIN_DEFAULT_VISIBLE_BARS);
       const startIndex = Math.max(0, data.length - visibleBars);
       chartRef.current?.timeScale().setVisibleLogicalRange({
@@ -322,7 +322,7 @@ export const KlineChart: React.FC = () => {
       const isNearRealtime = Boolean(
         visibleRange &&
         previousLastLogical >= 0 &&
-        visibleRange.to >= previousLastLogical - 5,
+        visibleRange.to >= previousLastLogical - 5
       );
 
       candleSeriesRef.current.setData(data);
@@ -337,11 +337,9 @@ export const KlineChart: React.FC = () => {
       }
     } else if (updateMode === 'update-last' && nextLast) {
       candleSeriesRef.current.update(nextLast);
-      // Ensure visible range is set correctly when chart might be zoomed in too far
       const visibleRange = chartRef.current?.timeScale().getVisibleLogicalRange();
       if (visibleRange) {
         const rangeWidth = visibleRange.to - visibleRange.from;
-        // If visible range is too narrow (showing only a few bars), reset it
         if (rangeWidth < 10) {
           const visibleBars = Math.min(data.length, MIN_DEFAULT_VISIBLE_BARS);
           const startIndex = Math.max(0, data.length - visibleBars);
@@ -378,7 +376,7 @@ export const KlineChart: React.FC = () => {
   const legendItems = buildIndicatorLegend(klines, indicatorSettings);
   const activeKline = hoveredKline ?? klines[klines.length - 1] ?? null;
   const activeSnapshot = buildInspectorSnapshot(activeKline);
-  const inspectorMarketLabel = `${formatMarketSymbol(symbol)} \u00b7 ${formatChartIntervalLabel(interval)} \u00b7 ${exchange.toUpperCase()}`;
+  const inspectorMarketLabel = `${formatMarketSymbol(symbol)} · ${formatChartIntervalLabel(interval)} · ${exchange.toUpperCase()}`;
   const activeDirection =
     activeSnapshot === null ? 'flat' : activeSnapshot.change > 0 ? 'up' : activeSnapshot.change < 0 ? 'down' : 'flat';
 
@@ -418,7 +416,7 @@ export const KlineChart: React.FC = () => {
 
             {indicatorSettings.volume && activeKline ? (
               <div className={`chart-volume-legend chart-volume-legend--${activeDirection}`}>
-                <span className="chart-volume-legend__label">{'\u6210\u4ea4\u91cf (Volume)'}</span>
+                <span className="chart-volume-legend__label">{'成交量 (Volume)'}</span>
                 <span className="chart-volume-legend__value">
                   {formatChartVolumeLegendValue(activeKline.volume)}
                 </span>
@@ -470,8 +468,8 @@ export const KlineChart: React.FC = () => {
 
         {!isLoadingKlines && klines.length === 0 ? (
           <div className="chart-overlay">
-            <strong>{'\u7b49\u5f85\u5e02\u573a\u6570\u636e'}</strong>
-            <span>{'\u5f53\u524d\u7b5b\u9009\u6761\u4ef6\u4e0b\u6ca1\u6709\u53ef\u7528 K \u7ebf\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u6216\u5207\u6362\u5e02\u573a\u3002'}</span>
+            <strong>{'等待市场数据'}</strong>
+            <span>{'当前筛选条件下没有可用 K 线，请稍后重试或切换市场。'}</span>
           </div>
         ) : null}
       </div>
