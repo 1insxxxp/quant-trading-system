@@ -1002,6 +1002,13 @@ input[type='checkbox'] {
   font-family: var(--font-display);
   font-size: 0.66rem;
   line-height: 1;
+  font-weight: 700;
+  color: #a8c7ff;
+  text-transform: uppercase;
+}
+
+:root[data-theme='light'] .market-icon__coin-glyph {
+  color: #4b6b9a;
 }
 
 .market-icon--asset-eth {
@@ -1127,8 +1134,10 @@ input[type='checkbox'] {
 .market-select__panel {
   position: absolute;
   top: calc(100% + 8px);
-  left: 0;
+  left: auto;
   right: 0;
+  min-width: 160px;
+  max-width: 220px;
   z-index: 14;
   display: block;
   padding: 6px;
@@ -1269,6 +1278,14 @@ input[type='checkbox'] {
 
   /* Transition */
   transition: all 140ms ease;
+}
+
+.market-select__option .market-select__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
 }
 
 .market-select__option:last-child {
