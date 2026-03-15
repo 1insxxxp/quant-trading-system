@@ -459,7 +459,12 @@ export const KlineChart: React.FC = () => {
         to: data.length - 1 + DEFAULT_RIGHT_PADDING_BARS,
       });
 
-      // 数据加载完成后禁用自动缩放，允许自由拖动
+      // 数据加载完成后先启用自动缩放，确保价格刻度正确显示
+      candleSeriesRef.current.priceScale().applyOptions({
+        autoScale: true,
+      });
+
+      // 然后禁用自动缩放，允许用户自由拖动
       chartRef.current?.applyOptions({
         rightPriceScale: {
           autoScale: false,
