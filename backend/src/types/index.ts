@@ -155,13 +155,18 @@ export interface SymbolResponse {
   error?: string;
 }
 
-export type ChartIndicatorId = 'volume' | 'ma5' | 'ma10' | 'ma20';
+export type ChartIndicatorId = 'volume' | 'ma5' | 'ma10' | 'ma20' | 'ema12' | 'ema26' | 'rsi' | 'macd' | 'bollinger';
 
 export interface ChartIndicatorSettings {
   volume: boolean;
   ma5: boolean;
   ma10: boolean;
   ma20: boolean;
+  ema12: boolean;
+  ema26: boolean;
+  rsi: boolean;
+  macd: boolean;
+  bollinger: boolean;
   fundingRate?: boolean;
 }
 

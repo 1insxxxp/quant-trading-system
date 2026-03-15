@@ -9,10 +9,15 @@ interface IndicatorSettingsButtonProps {
 }
 
 const INDICATOR_OPTIONS: Array<{ id: IndicatorId; label: string }> = [
-  { id: 'volume', label: '\u6210\u4ea4\u91cf' },
+  { id: 'volume', label: '成交量' },
   { id: 'ma5', label: 'MA5' },
   { id: 'ma10', label: 'MA10' },
   { id: 'ma20', label: 'MA20' },
+  { id: 'ema12', label: 'EMA12' },
+  { id: 'ema26', label: 'EMA26' },
+  { id: 'rsi', label: 'RSI' },
+  { id: 'macd', label: 'MACD' },
+  { id: 'bollinger', label: '布林带' },
 ];
 
 export const IndicatorSettingsButton: React.FC<IndicatorSettingsButtonProps> = ({

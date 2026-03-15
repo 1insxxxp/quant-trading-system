@@ -45,6 +45,15 @@ export const KlineChart: React.FC = () => {
   const ma5SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const ma10SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const ma20SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const ema12SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const ema26SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const rsiSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const macdDIFSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const macdDEASeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const macdHistogramSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const bollingerUpperSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const bollingerMiddleSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const bollingerLowerSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const chartDataRef = useRef<CandlestickData[]>([]);
   const latestPriceRef = useRef<number | null>(null);
   const latestKlineRef = useRef<Kline | null>(null);
@@ -166,38 +175,24 @@ export const KlineChart: React.FC = () => {
         secondsVisible: false,
         fixLeftEdge: false,
         fixRightEdge: false,
-        lockVisibleTimeRange: false,
       },
       rightPriceScale: {
         borderColor: initialTheme.scaleBorderColor,
-        autoScale: true,  // 启用自动缩放以确保正确显示
-        autoScaleMargin: 8,
+        autoScale: true,
         scaleMargins: {
           top: 0.1,
-          bottom: 0.2,
+          bottom: 0.25,
         },
+        visible: true,
       },
       handleScale: {
-        axisPressedMouseMove: {
-          time: false,      // 禁用时间轴拖动
-          price: true,      // 启用价格轴拖动
-        },
-        axisDoubleClickReset: {
-          time: false,
-          price: true,
-        },
         mouseWheel: true,
         pinch: true,
       },
       handleScroll: {
-        axisPressedMouseMove: {
-          time: true,       // 允许时间轴拖动
-          price: true,      // 允许价格轴拖动
-        },
         mouseWheel: true,
-        pressedMouseMove: true,
         horzTouchDrag: true,
-        vertTouchDrag: true,  // 启用垂直触摸拖动
+        vertTouchDrag: true,
       },
     });
 
@@ -215,9 +210,6 @@ export const KlineChart: React.FC = () => {
       color: '#26a69a',
       lastValueVisible: false,
       priceLineVisible: false,
-      lineColor: '#26a69a',
-      topColor: 'rgba(38, 166, 154, 0.3)',
-      bottomColor: 'rgba(38, 166, 154, 0.05)',
     });
     const ma5Series = chart.addLineSeries({
       color: initialTheme.ma5Color,
@@ -238,19 +230,105 @@ export const KlineChart: React.FC = () => {
       lastValueVisible: false,
     });
 
-    volumeSeries.priceScale().applyOptions({
-      scaleMargins: {
-        top: 0.75,    // 主图占 75%，副图占 25%
-        bottom: 0,
-      },
-      invertScale: false,
+    // EMA 系列
+    const ema12Series = chart.addLineSeries({
+      color: initialTheme.ema12Color,
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    const ema26Series = chart.addLineSeries({
+      color: initialTheme.ema26Color,
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
     });
 
-    // 为主图价格轴设置边距，与副图区分
+    // RSI 系列（独立价格刻度）
+    const rsiSeries = chart.addLineSeries({
+      color: initialTheme.rsiColor,
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      priceScaleId: 'rsi',
+    });
+
+    // MACD 系列（独立价格刻度）
+    const macdDIFSeries = chart.addLineSeries({
+      color: initialTheme.macdDIFColor,
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      priceScaleId: 'macd',
+    });
+    const macdDEASeries = chart.addLineSeries({
+      color: initialTheme.macdDEAColor,
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      priceScaleId: 'macd',
+    });
+    const macdHistogramSeries = chart.addHistogramSeries({
+      priceScaleId: 'macd',
+      lastValueVisible: false,
+      priceLineVisible: false,
+    });
+
+    // 布林带系列
+    const bollingerUpperSeries = chart.addLineSeries({
+      color: initialTheme.bollingerUpperColor,
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    const bollingerMiddleSeries = chart.addLineSeries({
+      color: initialTheme.bollingerMiddleColor,
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    const bollingerLowerSeries = chart.addLineSeries({
+      color: initialTheme.bollingerLowerColor,
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+
+    // 配置副图价格刻度 - Volume（底部）
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: {
+        top: 0.75,
+        bottom: 0,
+      },
+      visible: true,
+      autoScale: true,
+    });
+
+    // 配置 RSI 刻度 (0-100)
+    chart.priceScale('rsi').applyOptions({
+      scaleMargins: {
+        top: 0.7,
+        bottom: 0.05,
+      },
+      visible: false,
+      autoScale: false,
+    });
+
+    // 配置 MACD 刻度
+    chart.priceScale('macd').applyOptions({
+      scaleMargins: {
+        top: 0.7,
+        bottom: 0.05,
+      },
+      visible: false, // 默认隐藏，显示MACD时启用
+      autoScale: true,
+    });
+
+    // 为主图价格轴设置边距
     candleSeries.priceScale().applyOptions({
       scaleMargins: {
         top: 0.1,
-        bottom: 0.25,  // 底部留出 25% 给成交量副图
+        bottom: 0.25,
       },
     });
 
@@ -260,6 +338,15 @@ export const KlineChart: React.FC = () => {
     ma5SeriesRef.current = ma5Series;
     ma10SeriesRef.current = ma10Series;
     ma20SeriesRef.current = ma20Series;
+    ema12SeriesRef.current = ema12Series;
+    ema26SeriesRef.current = ema26Series;
+    rsiSeriesRef.current = rsiSeries;
+    macdDIFSeriesRef.current = macdDIFSeries;
+    macdDEASeriesRef.current = macdDEASeries;
+    macdHistogramSeriesRef.current = macdHistogramSeries;
+    bollingerUpperSeriesRef.current = bollingerUpperSeries;
+    bollingerMiddleSeriesRef.current = bollingerMiddleSeries;
+    bollingerLowerSeriesRef.current = bollingerLowerSeries;
     previousDataRef.current = [];
     previousMarketKeyRef.current = null;
     isHistoryPagingReadyRef.current = false;
@@ -358,31 +445,17 @@ export const KlineChart: React.FC = () => {
       rightPriceScale: {
         borderColor: nextTheme.scaleBorderColor,
         autoScale: true,
-        autoScaleMargin: 8,
         scaleMargins: {
           top: 0.1,
           bottom: 0.2,
         },
       },
       handleScale: {
-        axisPressedMouseMove: {
-          time: false,
-          price: true,
-        },
-        axisDoubleClickReset: {
-          time: false,
-          price: true,
-        },
         mouseWheel: true,
         pinch: true,
       },
       handleScroll: {
-        axisPressedMouseMove: {
-          time: true,
-          price: true,
-        },
         mouseWheel: true,
-        pressedMouseMove: true,
         horzTouchDrag: true,
         vertTouchDrag: true,
       },
@@ -397,6 +470,14 @@ export const KlineChart: React.FC = () => {
     ma5SeriesRef.current?.applyOptions({ color: nextTheme.ma5Color });
     ma10SeriesRef.current?.applyOptions({ color: nextTheme.ma10Color });
     ma20SeriesRef.current?.applyOptions({ color: nextTheme.ma20Color });
+    ema12SeriesRef.current?.applyOptions({ color: nextTheme.ema12Color });
+    ema26SeriesRef.current?.applyOptions({ color: nextTheme.ema26Color });
+    rsiSeriesRef.current?.applyOptions({ color: nextTheme.rsiColor });
+    macdDIFSeriesRef.current?.applyOptions({ color: nextTheme.macdDIFColor });
+    macdDEASeriesRef.current?.applyOptions({ color: nextTheme.macdDEAColor });
+    bollingerUpperSeriesRef.current?.applyOptions({ color: nextTheme.bollingerUpperColor });
+    bollingerMiddleSeriesRef.current?.applyOptions({ color: nextTheme.bollingerMiddleColor });
+    bollingerLowerSeriesRef.current?.applyOptions({ color: nextTheme.bollingerLowerColor });
     syncDetachedRealtimePriceLine();
   }, [theme, isCrosshairMagnetEnabled]);
 
@@ -419,6 +500,15 @@ export const KlineChart: React.FC = () => {
             ma5: ma5SeriesRef.current,
             ma10: ma10SeriesRef.current,
             ma20: ma20SeriesRef.current,
+            ema12: ema12SeriesRef.current,
+            ema26: ema26SeriesRef.current,
+            rsi: rsiSeriesRef.current,
+            macdDIF: macdDIFSeriesRef.current,
+            macdDEA: macdDEASeriesRef.current,
+            macdHistogram: macdHistogramSeriesRef.current,
+            bollingerUpper: bollingerUpperSeriesRef.current,
+            bollingerMiddle: bollingerMiddleSeriesRef.current,
+            bollingerLower: bollingerLowerSeriesRef.current,
           },
         });
         previousDataRef.current = [];
@@ -533,8 +623,23 @@ export const KlineChart: React.FC = () => {
         ma5: ma5SeriesRef.current,
         ma10: ma10SeriesRef.current,
         ma20: ma20SeriesRef.current,
+        ema12: ema12SeriesRef.current,
+        ema26: ema26SeriesRef.current,
+        rsi: rsiSeriesRef.current,
+        macdDIF: macdDIFSeriesRef.current,
+        macdDEA: macdDEASeriesRef.current,
+        macdHistogram: macdHistogramSeriesRef.current,
+        bollingerUpper: bollingerUpperSeriesRef.current,
+        bollingerMiddle: bollingerMiddleSeriesRef.current,
+        bollingerLower: bollingerLowerSeriesRef.current,
       },
     });
+
+    // 控制副图 price scale 可见性
+    if (chartRef.current) {
+      chartRef.current.priceScale('rsi').applyOptions({ visible: indicatorSettings.rsi });
+      chartRef.current.priceScale('macd').applyOptions({ visible: indicatorSettings.macd });
+    }
 
     previousDataRef.current = data;
     previousMarketKeyRef.current = marketKey;
@@ -721,6 +826,14 @@ function getChartTheme(theme: ThemeMode) {
       ma5Color: '#2586ff',
       ma10Color: '#8f5dff',
       ma20Color: '#ef9f1d',
+      ema12Color: '#ff6b6b',
+      ema26Color: '#4ecdc4',
+      rsiColor: '#9b59b6',
+      macdDIFColor: '#3498db',
+      macdDEAColor: '#e74c3c',
+      bollingerUpperColor: 'rgba(46, 204, 113, 0.8)',
+      bollingerMiddleColor: 'rgba(46, 204, 113, 0.5)',
+      bollingerLowerColor: 'rgba(46, 204, 113, 0.8)',
     };
   }
 
@@ -740,12 +853,20 @@ function getChartTheme(theme: ThemeMode) {
     ma5Color: '#54a6ff',
     ma10Color: '#a67dff',
     ma20Color: '#ffbe55',
+    ema12Color: '#ff6b6b',
+    ema26Color: '#4ecdc4',
+    rsiColor: '#9b59b6',
+    macdDIFColor: '#3498db',
+    macdDEAColor: '#e74c3c',
+    bollingerUpperColor: 'rgba(46, 204, 113, 0.8)',
+    bollingerMiddleColor: 'rgba(46, 204, 113, 0.5)',
+    bollingerLowerColor: 'rgba(46, 204, 113, 0.8)',
   };
 }
 
 function resolveKlineFromCrosshair(params: {
   param: MouseEventParams<Time>;
-  klines: ReturnType<typeof useMarketStore.getState>['klines'];
+  klines: Kline[];
 }) {
   const { param, klines } = params;
 

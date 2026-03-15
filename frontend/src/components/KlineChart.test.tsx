@@ -49,6 +49,11 @@ describe('KlineChart', () => {
       ma5: false,
       ma10: false,
       ma20: false,
+      ema12: false,
+      ema26: false,
+      rsi: false,
+      macd: false,
+      bollinger: false,
     };
   });
 
@@ -102,6 +107,11 @@ describe('KlineChart', () => {
       ma5: true,
       ma10: false,
       ma20: false,
+      ema12: false,
+      ema26: false,
+      rsi: false,
+      macd: false,
+      bollinger: false,
     };
 
     const markup = renderToStaticMarkup(<KlineChart />);

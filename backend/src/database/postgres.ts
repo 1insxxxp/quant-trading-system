@@ -23,6 +23,11 @@ const DEFAULT_CHART_INDICATOR_SETTINGS: ChartIndicatorSettings = {
   ma5: false,
   ma10: false,
   ma20: false,
+  ema12: false,
+  ema26: false,
+  rsi: false,
+  macd: false,
+  bollinger: false,
 };
 
 const CHART_PREFERENCES_KEY = 'chart-indicators';
@@ -640,5 +645,10 @@ function normalizeChartIndicatorSettings(
     ma5: source.ma5 === true,
     ma10: source.ma10 === true,
     ma20: source.ma20 === true,
+    ema12: source.ema12 === true,
+    ema26: source.ema26 === true,
+    rsi: source.rsi === true,
+    macd: source.macd === true,
+    bollinger: source.bollinger === true,
   };
 }

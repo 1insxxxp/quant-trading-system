@@ -20,6 +20,11 @@ export const DEFAULT_INDICATOR_SETTINGS: IndicatorSettings = {
   ma5: false,
   ma10: false,
   ma20: false,
+  ema12: false,
+  ema26: false,
+  rsi: false,
+  macd: false,
+  bollinger: false,
 };
 
 const DEFAULT_SYMBOLS: SymbolOption[] = [
@@ -380,12 +385,6 @@ export const useMarketStore = create<MarketState>((set, get) => ({
 
   setWsLatency: (latency: number) => {
     set((state) => {
-      const monitor = {
-        latency,
-        avgLatency: state.wsLatency,
-        status: state.wsLatencyStatus,
-      };
-
       // 简单计算延迟状态
       let newStatus: typeof state.wsLatencyStatus = 'unknown';
       if (latency > 0) {
@@ -955,6 +954,11 @@ function normalizeIndicatorSettings(
     ma5: settings?.ma5 === true,
     ma10: settings?.ma10 === true,
     ma20: settings?.ma20 === true,
+    ema12: settings?.ema12 === true,
+    ema26: settings?.ema26 === true,
+    rsi: settings?.rsi === true,
+    macd: settings?.macd === true,
+    bollinger: settings?.bollinger === true,
   };
 }
 

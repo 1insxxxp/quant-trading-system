@@ -40,12 +40,26 @@ describe('klineChartIndicators', () => {
         ma5: true,
         ma10: false,
         ma20: false,
+        ema12: false,
+        ema26: false,
+        rsi: false,
+        macd: false,
+        bollinger: false,
       },
       series: {
         volume: volumeSeries as unknown as ISeriesApi<'Histogram'>,
         ma5: ma5Series as unknown as ISeriesApi<'Line'>,
         ma10: ma10Series as unknown as ISeriesApi<'Line'>,
         ma20: ma20Series as unknown as ISeriesApi<'Line'>,
+        ema12: ma10Series as unknown as ISeriesApi<'Line'>,
+        ema26: ma10Series as unknown as ISeriesApi<'Line'>,
+        rsi: ma10Series as unknown as ISeriesApi<'Line'>,
+        macdDIF: ma10Series as unknown as ISeriesApi<'Line'>,
+        macdDEA: ma10Series as unknown as ISeriesApi<'Line'>,
+        macdHistogram: ma10Series as unknown as ISeriesApi<'Histogram'>,
+        bollingerUpper: ma10Series as unknown as ISeriesApi<'Line'>,
+        bollingerMiddle: ma10Series as unknown as ISeriesApi<'Line'>,
+        bollingerLower: ma10Series as unknown as ISeriesApi<'Line'>,
       },
     });
 
@@ -66,6 +80,11 @@ describe('klineChartIndicators', () => {
       ma5: true,
       ma10: false,
       ma20: false,
+      ema12: false,
+      ema26: false,
+      rsi: false,
+      macd: false,
+      bollinger: false,
     }).map((item) => item.label)).toEqual(['MA5']);
   });
 });

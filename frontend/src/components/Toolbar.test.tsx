@@ -19,6 +19,11 @@ const indicatorSettings: IndicatorSettings = {
   ma5: true,
   ma10: false,
   ma20: false,
+  ema12: false,
+  ema26: false,
+  rsi: false,
+  macd: false,
+  bollinger: false,
 };
 const onToggleIndicator = vi.fn();
 

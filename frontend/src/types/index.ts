@@ -42,7 +42,7 @@ export interface SymbolOption {
   quoteAsset?: string;
 }
 
-export type IndicatorId = 'volume' | 'ma5' | 'ma10' | 'ma20';
+export type IndicatorId = 'volume' | 'ma5' | 'ma10' | 'ma20' | 'ema12' | 'ema26' | 'rsi' | 'macd' | 'bollinger';
 
 export type IndicatorSettings = Record<IndicatorId, boolean>;
 

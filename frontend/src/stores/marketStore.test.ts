@@ -52,6 +52,11 @@ describe('marketStore', () => {
           ma5: false,
           ma10: false,
           ma20: false,
+          ema12: false,
+          ema26: false,
+          rsi: false,
+          macd: false,
+          bollinger: false,
         } satisfies IndicatorSettings,
         isLoadingIndicatorSettings: false,
       },
@@ -722,6 +727,11 @@ describe('marketStore', () => {
       ma5: true,
       ma10: false,
       ma20: true,
+      ema12: false,
+      ema26: false,
+      rsi: false,
+      macd: false,
+      bollinger: false,
     });
     expect(useMarketStore.getState().isLoadingIndicatorSettings).toBe(false);
   });
@@ -740,6 +750,11 @@ describe('marketStore', () => {
         ma5: true,
         ma10: true,
         ma20: true,
+        ema12: false,
+        ema26: false,
+        rsi: false,
+        macd: false,
+        bollinger: false,
       },
     });
 
@@ -751,6 +766,11 @@ describe('marketStore', () => {
       ma5: false,
       ma10: false,
       ma20: false,
+      ema12: false,
+      ema26: false,
+      rsi: false,
+      macd: false,
+      bollinger: false,
     });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
@@ -796,6 +816,11 @@ describe('marketStore', () => {
       ma5: false,
       ma10: true,
       ma20: true,
+      ema12: false,
+      ema26: false,
+      rsi: false,
+      macd: false,
+      bollinger: false,
     });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });

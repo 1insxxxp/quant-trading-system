@@ -1606,6 +1606,26 @@ input[type='checkbox'] {
   color: #f59e0b;
 }
 
+.chart-indicator--ema12 {
+  color: #ef4444;
+}
+
+.chart-indicator--ema26 {
+  color: #14b8a6;
+}
+
+.chart-indicator--rsi {
+  color: #a855f7;
+}
+
+.chart-indicator--macd {
+  color: #3b82f6;
+}
+
+.chart-indicator--bollinger {
+  color: #22c55e;
+}
+
 .chart-inspector {
   display: flex;
   flex-direction: row;
