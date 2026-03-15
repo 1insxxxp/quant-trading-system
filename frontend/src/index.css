@@ -1130,8 +1130,7 @@ input[type='checkbox'] {
   left: 0;
   right: 0;
   z-index: 14;
-  display: grid;
-  gap: 4px;
+  display: block;
   padding: 6px;
 
   /* Border & Background */
@@ -1255,6 +1254,7 @@ input[type='checkbox'] {
   align-items: center;
   gap: 8px;
   padding: 7px 9px;
+  margin-bottom: 4px;
 
   /* Border & Background */
   border: 1px solid transparent;
@@ -1269,6 +1269,10 @@ input[type='checkbox'] {
 
   /* Transition */
   transition: all 140ms ease;
+}
+
+.market-select__option:last-child {
+  margin-bottom: 0;
 }
 
 /* Hover / Focus */

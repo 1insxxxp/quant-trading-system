@@ -199,7 +199,6 @@ export const MarketSelect: React.FC<MarketSelectProps> = ({
 
     onChange(option.value);
     setSearchQuery('');
-    setHighlightedIndex(index);
     setIsOpen(false);
   };
 
