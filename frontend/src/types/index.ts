@@ -14,12 +14,24 @@ export interface Kline {
   is_closed: number;
 }
 
+export interface FundingRate {
+  exchange: string;
+  symbol: string;
+  fundingRate: number;
+  fundingTimestamp: number;
+  nextFundingTimestamp?: number;
+  markPrice?: number;
+  indexPrice?: number;
+}
+
 export interface PriceUpdate {
   exchange: string;
   symbol: string;
   price: number;
   timestamp: number;
 }
+
+export type KlineLoadState = 'idle' | 'loading' | 'loaded' | 'error';
 
 export type KlineSource = 'remote' | 'cache' | 'demo' | 'empty';
 
@@ -52,6 +64,11 @@ export interface MarketState {
   indicatorSettings: IndicatorSettings;
   isLoadingIndicatorSettings: boolean;
   indicatorPreferencesUnavailable: boolean;
+  fundingRate: FundingRate | null;
+  isLoadingFundingRate: boolean;
+  // 细化的加载状态
+  klineLoadState: KlineLoadState;
+  realtimeUpdateState: 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
   setExchange: (exchange: string) => void;
   setSymbol: (symbol: string) => void;
@@ -61,10 +78,13 @@ export interface MarketState {
   updateKline: (kline: Kline) => void;
   setLatestPrice: (price: number, timestamp?: number) => void;
   setIsConnected: (connected: boolean) => void;
+  setKlineLoadState: (state: KlineLoadState) => void;
+  setRealtimeUpdateState: (state: 'disconnected' | 'connecting' | 'connected' | 'reconnecting') => void;
   loadInitialKlines: () => Promise<void>;
   loadOlderKlines: () => Promise<void>;
   retryLoadOlderKlines: () => Promise<void>;
   fetchSymbols: () => Promise<void>;
   fetchIndicatorSettings: () => Promise<void>;
   updateIndicatorSetting: (indicatorId: IndicatorId, enabled: boolean) => Promise<void>;
+  fetchFundingRate: () => Promise<void>;
 }

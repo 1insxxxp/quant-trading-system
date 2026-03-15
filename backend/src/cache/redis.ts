@@ -42,14 +42,18 @@ export class RedisCache {
       const key = `${KLINE_CACHE_PREFIX}${exchange}:${symbol}:${interval}`;
       const hotKey = `${key}:hot`;
 
-      const hotData = await this.client.get(hotKey);
+      // 使用 pipeline 减少网络往返RTT
+      const pipeline = this.client.multi();
+      pipeline.get(hotKey);
+      pipeline.get(key);
+      const [hotData, coldData] = await pipeline.exec() as [string | null, string | null];
+
       if (hotData) {
         const hotKlines = JSON.parse(hotData) as Kline[];
         if (hotKlines.length >= limit) {
           return hotKlines.slice(-limit);
         }
 
-        const coldData = await this.client.get(key);
         if (coldData) {
           const coldKlines = JSON.parse(coldData) as Kline[];
           const merged = [...coldKlines, ...hotKlines];
@@ -59,10 +63,9 @@ export class RedisCache {
         return hotKlines.slice(-limit);
       }
 
-      const data = await this.client.get(key);
-      if (!data) return null;
+      if (!coldData) return null;
 
-      const klines = JSON.parse(data) as Kline[];
+      const klines = JSON.parse(coldData) as Kline[];
       return klines.slice(-limit);
     } catch (error: any) {
       console.warn('Redis get failed:', error.message);

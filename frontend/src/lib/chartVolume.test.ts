@@ -26,8 +26,8 @@ describe('chartVolume', () => {
       makeKline({ open_time: 1_000_000, volume: 25, open: 100, close: 110 }),
       makeKline({ open_time: 1_000_300, volume: 40, open: 110, close: 90 }),
     ])).toEqual([
-      { time: 1000, value: 25, color: '#0ea765' },
-      { time: 1000.3, value: 40, color: '#e15656' },
+      { time: 1000, value: 25, color: 'rgba(61, 220, 151, 0.4)' },
+      { time: 1000.3, value: 40, color: 'rgba(255, 107, 124, 0.4)' },
     ]);
   });
 });

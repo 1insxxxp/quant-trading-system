@@ -245,11 +245,11 @@ describe('marketStore', () => {
     expect(useMarketStore.getState().klines).toEqual([makeKline()]);
   });
 
-  it('requests 2000 bars for the initial market load', async () => {
+  it('requests 500 bars for the initial market load', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: string) => {
-        expect(input).toContain('limit=2000');
+        expect(input).toContain('limit=500');
 
         return {
           ok: true,
@@ -265,18 +265,15 @@ describe('marketStore', () => {
     await useMarketStore.getState().loadInitialKlines();
   });
 
-  it('tops up initial history to 2000 bars when the first response page is short', async () => {
-    const firstPage = Array.from({ length: 1000 }, (_, index) =>
+  it('loads initial klines from remote', async () => {
+    const firstPage = Array.from({ length: 250 }, (_, index) =>
       makeKline({ open_time: 1_000_000 + index * 60_000, close_time: 1_000_001 + index * 60_000 }),
-    );
-    const secondPage = Array.from({ length: 1000 }, (_, index) =>
-      makeKline({ open_time: 1000 + index * 60_000, close_time: 1001 + index * 60_000 }),
     );
 
     const fetchSpy = vi
       .fn()
       .mockImplementationOnce(async (input: string) => {
-        expect(input).toContain('limit=2000');
+        expect(input).toContain('limit=500');
         return {
           ok: true,
           json: async () => ({
@@ -286,27 +283,14 @@ describe('marketStore', () => {
             klines: firstPage,
           }),
         } as Response;
-      })
-      .mockImplementationOnce(async (input: string) => {
-        expect(input).toContain('limit=1000');
-        expect(input).toContain(`before=${firstPage[0].open_time}`);
-        return {
-          ok: true,
-          json: async () => ({
-            success: true,
-            source: 'remote',
-            hasMore: true,
-            klines: secondPage,
-          }),
-        } as Response;
       });
 
     vi.stubGlobal('fetch', fetchSpy as typeof fetch);
 
     await useMarketStore.getState().loadInitialKlines();
 
-    expect(useMarketStore.getState().klines).toHaveLength(2000);
-    expect(useMarketStore.getState().klines[0]?.open_time).toBe(secondPage[0].open_time);
+    expect(useMarketStore.getState().klines).toHaveLength(250);
+    expect(useMarketStore.getState().klines[0]?.open_time).toBe(firstPage[0].open_time);
     expect(useMarketStore.getState().klines[useMarketStore.getState().klines.length - 1]?.open_time).toBe(
       firstPage[firstPage.length - 1]?.open_time,
     );

@@ -162,19 +162,20 @@ export class DatabaseService {
     limit: number = 2000,
     before?: number,
   ): Promise<any[]> {
-    const hasBefore = typeof before === 'number';
+    // 使用统一参数化查询，避免 SQL 拼接导致执行计划无法缓存
     const query = `
-      SELECT * FROM klines
+      SELECT exchange, symbol, interval, open_time, close_time,
+             open, high, low, close, volume, quote_volume,
+             trades_count, is_closed
+      FROM klines
       WHERE exchange = $1
         AND symbol = $2
         AND interval = $3
-        ${hasBefore ? 'AND open_time <= $4' : ''}
+        AND ($4::BIGINT IS NULL OR open_time < $4)
       ORDER BY open_time DESC
-      LIMIT ${hasBefore ? '$5' : '$4'}
+      LIMIT $5
     `;
-    const params = hasBefore
-      ? [exchange, symbol, interval, before, limit]
-      : [exchange, symbol, interval, limit];
+    const params = [exchange, symbol, interval, before ?? null, limit];
 
     const result = await this.query(query, params);
 

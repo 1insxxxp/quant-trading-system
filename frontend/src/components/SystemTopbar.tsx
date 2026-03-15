@@ -40,7 +40,7 @@ function resolvePriceTone(params: {
 export const SystemTopbar: React.FC = () => {
   const isSidebarCollapsed = useUiStore((state) => state.isSidebarCollapsed);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
-  const isConnected = useMarketStore((state) => state.isConnected);
+  const realtimeUpdateState = useMarketStore((state) => state.realtimeUpdateState);
   const exchange = useMarketStore((state) => state.exchange);
   const symbol = useMarketStore((state) => state.symbol);
   const symbols = useMarketStore((state) => state.symbols);
@@ -73,7 +73,22 @@ export const SystemTopbar: React.FC = () => {
 
   const marketLabel = `${formatMarketSymbol(symbol)} · ${exchange.toUpperCase()}`;
   const latestPriceLabel = latestPrice !== null ? formatLivePrice(latestPrice) : '等待价格';
-  const statusLabel = isConnected ? '连接在线' : '等待重连';
+
+  const getStatusConfig = () => {
+    switch (realtimeUpdateState) {
+      case 'connected':
+        return { class: 'live', label: '连接在线' };
+      case 'reconnecting':
+        return { class: 'reconnecting', label: '正在重连' };
+      case 'connecting':
+        return { class: 'waiting', label: '正在连接' };
+      case 'disconnected':
+      default:
+        return { class: 'waiting', label: '连接断开' };
+    }
+  };
+
+  const statusConfig = getStatusConfig();
   const priceTone = resolvePriceTone({
     latestPrice,
     latestKlineOpen: latestKline?.open ?? null,
@@ -139,9 +154,9 @@ export const SystemTopbar: React.FC = () => {
         </div>
       </div>
 
-      <div className="system-topbar__status" role="status" aria-live="polite" aria-label={statusLabel}>
+      <div className="system-topbar__status" role="status" aria-live="polite" aria-label={statusConfig.label}>
         <span
-          className={`signal-light signal-light--${isConnected ? 'live' : 'waiting'}`}
+          className={`signal-light signal-light--${statusConfig.class}`}
           aria-hidden="true"
         />
       </div>

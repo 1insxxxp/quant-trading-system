@@ -813,6 +813,12 @@ input[type='checkbox'] {
   animation: signal-pulse 1.5s ease-in-out infinite, signal-orbit-waiting 3s linear infinite;
 }
 
+.signal-light--reconnecting {
+  background: #f4ba58;
+  box-shadow: 0 0 0 5px rgba(244, 186, 88, 0.12), 0 0 18px rgba(244, 186, 88, 0.3);
+  animation: signal-pulse 0.8s ease-in-out infinite, signal-orbit-waiting 2s linear infinite;
+}
+
 /* ================================
    Sidebar Toggle Button
    ================================ */
@@ -1565,6 +1571,42 @@ input[type='checkbox'] {
   color: var(--text-main);
   font-size: 0.82rem;
   font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.chart-inspector__funding-rate {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.chart-inspector__funding-rate-label {
+  color: var(--text-subtle);
+  font-size: 0.8rem;
+}
+
+.chart-inspector__funding-rate-value {
+  min-width: 5.2rem;
+  color: var(--text-main);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.chart-inspector__funding-rate-value--up {
+  color: var(--success);
+}
+
+.chart-inspector__funding-rate-value--down {
+  color: var(--danger);
+}
+
+.chart-inspector__funding-time {
+  font-size: 0.75rem;
+  color: var(--text-subtle);
+  opacity: 0.8;
+  margin-left: 4px;
 }
 
 .chart-inspector__metric--wide .chart-inspector__metric-value {
@@ -1619,16 +1661,26 @@ input[type='checkbox'] {
   z-index: 0;
 }
 
-.chart-panel__body::after {
-  content: '';
+/* 成交量副图区域背景 - 与主图区分 */
+.chart-panel__volume-bg {
   position: absolute;
-  inset: -20% 0 auto 0;
-  height: 120px;
-  background: linear-gradient(180deg, rgba(67, 212, 255, 0.1), transparent);
-  opacity: 0.28;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 25%;  /* 成交量副图区域高度 */
+  background: linear-gradient(180deg,
+    rgba(67, 212, 255, 0.03) 0%,
+    rgba(67, 212, 255, 0.06) 100%);
   pointer-events: none;
-  animation: chart-scan 8s linear infinite;
   z-index: 0;
+  border-top: 1px solid rgba(67, 212, 255, 0.1);
+}
+
+:root[data-theme='light'] .chart-panel__volume-bg {
+  background: linear-gradient(180deg,
+    rgba(58, 134, 198, 0.02) 0%,
+    rgba(58, 134, 198, 0.04) 100%);
+  border-top: 1px solid rgba(58, 134, 198, 0.08);
 }
 
 .chart-panel__hud {
@@ -1890,6 +1942,38 @@ input[type='checkbox'] {
 .chart-overlay--loading {
   background: rgba(4, 12, 23, 0.72);
   backdrop-filter: blur(4px);
+}
+
+.chart-overlay--error {
+  background: rgba(4, 12, 23, 0.86);
+  backdrop-filter: blur(6px);
+}
+
+.chart-error-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(255, 107, 124, 0.2), rgba(255, 107, 124, 0.08));
+  border: 2px solid var(--danger);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--danger);
+  box-shadow: 0 0 30px rgba(255, 107, 124, 0.3);
+}
+
+.chart-loading-text__title--error {
+  color: var(--danger);
+}
+
+:root[data-theme='light'] .chart-overlay--error {
+  background: rgba(255, 245, 247, 0.86);
+}
+
+:root[data-theme='light'] .chart-error-icon {
+  background: linear-gradient(135deg, rgba(255, 107, 124, 0.15), rgba(255, 107, 124, 0.05));
 }
 
 .chart-overlay:not(.chart-overlay--loading) {
@@ -2699,6 +2783,11 @@ body::after {
   background: #6b7c8a;
 }
 
+:root[data-theme='light'] .signal-light--reconnecting {
+  background: #d1901c;
+  animation: signal-pulse 0.8s ease-in-out infinite;
+}
+
 @keyframes signal-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.6; transform: scale(0.95); }
@@ -2935,7 +3024,22 @@ body::after {
 .chart-panel__body::before {
   background:
     linear-gradient(180deg, rgba(63, 215, 198, 0.04), transparent 18%),
-    radial-gradient(circle at 100% 0%, rgba(37, 134, 255, 0.05), transparent 20%);
+    radial-gradient(circle at 100% 0%, rgba(37, 134, 255, 0.05), transparent 20%),
+    linear-gradient(180deg,
+      rgba(67, 212, 255, 0.02) 0%,
+      rgba(67, 212, 255, 0.05) 100%);  /* 成交量副图区域背景 */
+  background-blend-mode: normal;
+}
+
+/* 浅色主题下的成交量副图区域背景 */
+:root[data-theme='light'] .chart-panel__body::before {
+  background:
+    linear-gradient(180deg, rgba(63, 215, 198, 0.03), transparent 18%),
+    radial-gradient(circle at 100% 0%, rgba(37, 134, 255, 0.03), transparent 20%),
+    linear-gradient(180deg,
+      rgba(58, 134, 198, 0.015) 0%,
+      rgba(58, 134, 198, 0.04) 100%);
+  background-blend-mode: normal;
 }
 
 .chart-panel__body::after {
@@ -3846,6 +3950,26 @@ body::after {
   }
 }
 
+.chart-loading-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-top: 8px;
+}
+
+.chart-loading-text__title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-main);
+  letter-spacing: 0.02em;
+}
+
+.chart-loading-text__subtitle {
+  font-size: 0.82rem;
+  color: var(--text-subtle);
+}
+
 :root[data-theme='light'] .chart-loading-signal__bar {
   background: linear-gradient(180deg, rgba(36, 131, 232, 0.96), rgba(86, 187, 255, 0.24));
   box-shadow:
@@ -3931,85 +4055,6 @@ body::after {
   height: 100% !important;
   width: 100% !important;
   min-height: 0;
-}
-
-.chart-realtime-badge {
-  position: absolute;
-  right: 2px;
-  transform: translateY(-50%);
-  z-index: 6;
-  pointer-events: none;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: center;
-  min-width: 0;
-  padding: 4px 10px 5px 9px;
-  border-radius: 4px 0 0 4px;
-  border: 0;
-  box-shadow: none;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-  backdrop-filter: none;
-  white-space: nowrap;
-}
-
-.chart-realtime-badge__price {
-  display: block;
-  font-size: 0.9rem;
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: 0;
-}
-
-.chart-realtime-badge__countdown {
-  display: block;
-  margin-top: 2px;
-  font-size: 0.68rem;
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: 0.02em;
-  opacity: 0.96;
-}
-
-.chart-realtime-badge__digits {
-  justify-content: flex-end;
-}
-
-.chart-realtime-badge__digits .rolling-digits__digit {
-  width: 0.58em;
-}
-
-.chart-realtime-badge__digits--countdown .rolling-digits__digit {
-  width: 0.52em;
-}
-
-.chart-realtime-badge__digits--countdown .rolling-digits__separator {
-  padding: 0 0.01em;
-}
-
-.chart-realtime-badge--up {
-  color: #f6fffb;
-  background: #2fd694;
-}
-
-.chart-realtime-badge--down {
-  color: #fff7f8;
-  background: #f25f78;
-}
-
-:root[data-theme='light'] .chart-realtime-badge {
-  box-shadow: none;
-}
-
-:root[data-theme='light'] .chart-realtime-badge--up {
-  color: #ffffff;
-  background: #18b982;
-}
-
-:root[data-theme='light'] .chart-realtime-badge--down {
-  color: #ffffff;
-  background: #e76683;
 }
 
 .toolbar-terminal__group {

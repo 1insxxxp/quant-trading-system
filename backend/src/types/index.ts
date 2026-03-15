@@ -118,6 +118,7 @@ export interface ExchangeAdapter {
     callback: (price: number) => void,
   ): () => void;
   getSymbols(): Promise<SymbolInfo[]>;
+  getFundingRate?: (symbol: string) => Promise<FundingRate>;
   closeAll?: () => void;
 }
 
@@ -130,7 +131,9 @@ export interface WsMessage {
     | 'connected'
     | 'kline'
     | 'price'
-    | 'error';
+    | 'error'
+    | 'ping'
+    | 'pong';
   exchange?: string;
   symbol?: string;
   interval?: string;
@@ -154,4 +157,27 @@ export interface SymbolResponse {
 
 export type ChartIndicatorId = 'volume' | 'ma5' | 'ma10' | 'ma20';
 
-export type ChartIndicatorSettings = Record<ChartIndicatorId, boolean>;
+export interface ChartIndicatorSettings {
+  volume: boolean;
+  ma5: boolean;
+  ma10: boolean;
+  ma20: boolean;
+  fundingRate?: boolean;
+}
+
+export interface FundingRate {
+  exchange: string;
+  symbol: string;
+  fundingRate: number;
+  fundingTimestamp: number;
+  nextFundingTimestamp?: number;
+  markPrice?: number;
+  indexPrice?: number;
+}
+
+export interface FundingRateResponse {
+  success: boolean;
+  fundingRate?: FundingRate;
+  history?: FundingRate[];
+  error?: string;
+}

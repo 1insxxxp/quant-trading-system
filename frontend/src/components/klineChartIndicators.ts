@@ -16,11 +16,13 @@ interface IndicatorSeriesMap {
   ma20: ISeriesApi<'Line'> | null;
 }
 
-export function syncIndicatorSeries(params: {
+export interface SyncIndicatorSeriesParams {
   klines: Kline[];
   settings: IndicatorSettings;
   series: IndicatorSeriesMap;
-}) {
+}
+
+export function syncIndicatorSeries(params: SyncIndicatorSeriesParams) {
   const { klines, settings, series } = params;
 
   series.volume?.setData(settings.volume ? buildVolumeHistogramData(klines) : []);

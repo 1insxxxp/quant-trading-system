@@ -68,6 +68,9 @@ export class WebSocketService {
       case 'unsubscribe':
         this.handleUnsubscribe(ws, message);
         break;
+      case 'ping':
+        this.sendMessage(ws, { type: 'pong' });
+        break;
       default:
         this.sendError(ws, `Unsupported message type: ${message.type}`);
     }
@@ -221,6 +224,7 @@ export class WebSocketService {
       return;
     }
 
+    // 只序列化一次，所有订阅者共享同一字符串
     const payload = JSON.stringify({
       type: 'kline',
       exchange,
@@ -229,11 +233,11 @@ export class WebSocketService {
       data: kline,
     } satisfies WsMessage);
 
-    subscribers.forEach((ws) => {
+    for (const ws of subscribers) {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(payload);
       }
-    });
+    }
   }
 
   private async persistRealtimeKlines(klines: Kline[]) {
@@ -253,20 +257,26 @@ export class WebSocketService {
   }
 
   private broadcastPrice(exchange: string, symbol: string, priceUpdate: PriceUpdate) {
-    const subscribers = new Set<WebSocket>();
+    // 收集所有订阅者
+    const subscribers: WebSocket[] = [];
 
     this.subscriptions.forEach((clients, key) => {
       if (!key.startsWith(`${exchange}:${symbol}:`)) {
         return;
       }
 
-      clients.forEach((ws) => subscribers.add(ws));
+      for (const ws of clients) {
+        if (ws.readyState === WebSocket.OPEN) {
+          subscribers.push(ws);
+        }
+      }
     });
 
-    if (subscribers.size === 0) {
+    if (subscribers.length === 0) {
       return;
     }
 
+    // 只序列化一次，所有订阅者共享同一字符串
     const payload = JSON.stringify({
       type: 'price',
       exchange,
@@ -274,11 +284,9 @@ export class WebSocketService {
       data: priceUpdate,
     } satisfies WsMessage);
 
-    subscribers.forEach((ws) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(payload);
-      }
-    });
+    for (const ws of subscribers) {
+      ws.send(payload);
+    }
   }
 
   private sendMessage(ws: WebSocket, message: WsMessage) {

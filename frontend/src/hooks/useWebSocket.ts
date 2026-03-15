@@ -18,6 +18,7 @@ export const useWebSocket = () => {
   const updateKline = useMarketStore((state) => state.updateKline);
   const setLatestPrice = useMarketStore((state) => state.setLatestPrice);
   const setIsConnected = useMarketStore((state) => state.setIsConnected);
+  const setRealtimeUpdateState = useMarketStore((state) => state.setRealtimeUpdateState);
   const loadInitialKlines = useMarketStore((state) => state.loadInitialKlines);
   const hasStalePrice = (
     typeof lastPriceTimestamp !== 'number' ||
@@ -39,9 +40,14 @@ export const useWebSocket = () => {
       },
       onConnected: () => {
         setIsConnected(true);
+        setRealtimeUpdateState('connected');
       },
       onDisconnected: () => {
         setIsConnected(false);
+        setRealtimeUpdateState('disconnected');
+      },
+      onError: () => {
+        setRealtimeUpdateState('reconnecting');
       },
       onMessage: (message: MarketSocketMessage) => {
         const activeState = useMarketStore.getState();
@@ -52,6 +58,11 @@ export const useWebSocket = () => {
         );
 
         if (activeMarketKey !== marketKey) {
+          return;
+        }
+
+        // Ignore pong heartbeat responses
+        if (message.type === 'pong') {
           return;
         }
 
@@ -89,9 +100,6 @@ export const useWebSocket = () => {
             console.error('WebSocket message error:', message.error);
             break;
         }
-      },
-      onError: (error) => {
-        console.error('WebSocket transport error:', error);
       },
     });
 

@@ -104,56 +104,6 @@ export function formatChartVolumeLegendValue(value: number): string {
   });
 }
 
-export function formatChartCountdown(remainingMs: number): string {
-  const safeRemainingMs = Math.max(0, remainingMs);
-  const totalSeconds = Math.ceil(safeRemainingMs / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  if (hours > 0) {
-    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-  }
-
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-}
-
-export function resolveCurrentCandleCountdownLabel(params: {
-  interval: string;
-  latestKline: Pick<{ open_time: number; close_time: number }, 'open_time' | 'close_time'> | null;
-  now?: number;
-}): string | null {
-  const {
-    interval,
-    latestKline,
-    now = Date.now(),
-  } = params;
-
-  if (!latestKline) {
-    return null;
-  }
-
-  const inferredDuration = (latestKline.close_time - latestKline.open_time) + 1;
-  const intervalDuration = resolveChartIntervalMs(interval);
-  const durationMs = inferredDuration > 0 ? inferredDuration : intervalDuration;
-
-  if (!durationMs || durationMs <= 0) {
-    return null;
-  }
-
-  let periodEndExclusive = latestKline.close_time + 1;
-
-  if (periodEndExclusive <= latestKline.open_time) {
-    periodEndExclusive = latestKline.open_time + durationMs;
-  }
-
-  while (periodEndExclusive <= now) {
-    periodEndExclusive += durationMs;
-  }
-
-  return formatChartCountdown(periodEndExclusive - now);
-}
-
 export function resolveTimestampFromChartTime(time: Time): number | null {
   if (typeof time === 'number' && Number.isFinite(time)) {
     return normalizeTimestamp(time);

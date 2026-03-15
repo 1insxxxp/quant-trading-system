@@ -7,7 +7,8 @@ import {
   runTransportAttempts,
 } from '../network/exchange-transport.js';
 import { isBenignCloseBeforeConnectError, safeCloseWebSocket } from './websocket-close.js';
-import type { ExchangeAdapter, Kline, SymbolInfo, TradeTick } from '../types/index.js';
+import type { ExchangeAdapter, Kline, SymbolInfo, TradeTick, FundingRate } from '../types/index.js';
+import { validateKlines } from '../lib/kline-validator.js';
 
 type HttpGet = typeof axios.get;
 type WebSocketCtor = typeof WebSocket;
@@ -72,7 +73,7 @@ export class BinanceAdapter implements ExchangeAdapter {
         }),
       );
 
-      return response.data.map((item: any[]) => ({
+      const rawKlines = response.data.map((item: any[]) => ({
         exchange: 'binance',
         symbol: symbol.toUpperCase(),
         interval: this.intervalMap[interval] || '1h',
@@ -87,6 +88,15 @@ export class BinanceAdapter implements ExchangeAdapter {
         trades_count: item[8],
         is_closed: resolveBinanceRestKlineClosedState(item[6]),
       }));
+
+      // 校验并过滤无效数据
+      const { klines: validKlines, invalidCount } = validateKlines(rawKlines);
+
+      if (invalidCount > 0) {
+        console.warn(`Binance getKlines: filtered ${invalidCount} invalid klines out of ${rawKlines.length}`);
+      }
+
+      return validKlines;
     } catch (error: any) {
       console.error('Binance getKlines error:', error.message);
       throw new Error(`Binance API error: ${error.message}`);
@@ -197,6 +207,34 @@ export class BinanceAdapter implements ExchangeAdapter {
     } catch (error: any) {
       console.error('Binance getSymbols error:', error.message);
       return [];
+    }
+  }
+
+  async getFundingRate(symbol: string): Promise<FundingRate> {
+    try {
+      const response = await runTransportAttempts(
+        createTransportAttempts(this.transportConfig.rest, this.transportConfig.proxyUrl),
+        async (attempt) => this.httpGet(`${this.baseUrl}/fapi/v1/premiumIndex`, {
+          params: { symbol: symbol.toUpperCase() },
+          httpAgent: attempt.agent,
+          httpsAgent: attempt.agent,
+          proxy: false,
+          timeout: this.requestTimeoutMs,
+        }),
+      );
+
+      return {
+        exchange: 'binance',
+        symbol: symbol.toUpperCase(),
+        fundingRate: parseFloat(response.data.lastFundingRate),
+        fundingTimestamp: Number(response.data.lastFundingTime),
+        nextFundingTimestamp: Number(response.data.nextFundingTime),
+        markPrice: parseFloat(response.data.markPrice),
+        indexPrice: parseFloat(response.data.indexPrice),
+      };
+    } catch (error: any) {
+      console.error('Binance getFundingRate error:', error.message);
+      throw new Error(`Binance funding rate API error: ${error.message}`);
     }
   }
 

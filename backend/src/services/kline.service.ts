@@ -7,6 +7,8 @@ import { syncStateService } from './sync-state.service.js';
 
 const DEFAULT_INITIAL_KLINE_LIMIT = 500;
 const DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
+const QUERY_CACHE_TTL = 5 * 60 * 1000; // 5 分钟 - 历史数据缓存
+const QUERY_CACHE_TTL_LATEST = 30 * 1000; // 30 秒 - 最新数据缓存（快速过期以获取实时价格）
 
 const INTERVAL_MS: Record<string, number> = {
   '1m': 60 * 1000,
@@ -17,14 +19,67 @@ const INTERVAL_MS: Record<string, number> = {
   '1d': 24 * 60 * 60 * 1000,
 };
 
+// LRU 查询缓存：按 (exchange, symbol, interval) 预取整小时数据块
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+  key: string;
+}
+function createCacheKey(exchange: string, symbol: string, interval: string, limit: number, before?: number): string {
+  return `${exchange}:${symbol}:${interval}:${limit}:${before ?? 'latest'}`;
+}
+
+// SingleFlight 机制：并发查询去重
+interface FlightEntry<T> {
+  promise: Promise<T>;
+  timestamp: number;
+}
+
 export class KlineService {
   private adapters: Map<string, ExchangeAdapter>;
+  private queryCache = new Map<string, CacheEntry<Kline[]>>();
+  private singleFlights = new Map<string, FlightEntry<KlineQueryResult>>();
+  private cacheCleanupInterval: NodeJS.Timeout | null = null;
 
   constructor(adapters?: Map<string, ExchangeAdapter>) {
     this.adapters = adapters ?? new Map<string, ExchangeAdapter>([
       ['binance', new BinanceAdapter()],
       ['okx', new OKXAdapter()],
     ]);
+    this.startCacheCleanup();
+  }
+
+  private startCacheCleanup(): void {
+    // 每 10 秒清理一次过期缓存和 SingleFlight
+    this.cacheCleanupInterval = setInterval(() => {
+      const now = Date.now();
+      // 清理过期的查询缓存
+      for (const [key, entry] of this.queryCache.entries()) {
+        // 历史数据缓存 TTL 5 分钟，最新数据缓存 TTL 30 秒
+        const isLatestData = !key.includes(':before:');
+        const ttl = isLatestData ? QUERY_CACHE_TTL_LATEST : QUERY_CACHE_TTL;
+        if (now - entry.timestamp >= ttl) {
+          this.queryCache.delete(key);
+        }
+      }
+      // 清理过期的 SingleFlight（超过 60 秒未完成或已完成的查询）
+      for (const [key, entry] of this.singleFlights.entries()) {
+        if (now - entry.timestamp >= 60000) {
+          this.singleFlights.delete(key);
+        }
+      }
+    }, 10000);
+
+    // 进程退出时清理定时器
+    process.on('SIGINT', () => this.stopCacheCleanup());
+    process.on('SIGTERM', () => this.stopCacheCleanup());
+  }
+
+  private stopCacheCleanup(): void {
+    if (this.cacheCleanupInterval) {
+      clearInterval(this.cacheCleanupInterval);
+      this.cacheCleanupInterval = null;
+    }
   }
 
   async getKlines(
@@ -34,22 +89,66 @@ export class KlineService {
     limit: number = DEFAULT_INITIAL_KLINE_LIMIT,
     before?: number,
   ): Promise<KlineQueryResult> {
+    const cacheKey = createCacheKey(exchange, symbol, interval, limit, before);
+
+    // SingleFlight: 检查是否有相同的查询正在进行
+    const existingFlight = this.singleFlights.get(cacheKey);
+    if (existingFlight && Date.now() - existingFlight.timestamp < 60000) {
+      // 返回相同的 Promise，避免重复查询
+      return existingFlight.promise;
+    }
+
+    // 包装查询为 SingleFlight
+    const queryPromise = this.performKlineQuery(exchange, symbol, interval, limit, before, cacheKey);
+    const wrappedPromise = queryPromise.finally(() => {
+      // 查询完成后清理 SingleFlight
+      if (this.singleFlights.get(cacheKey)?.promise === queryPromise) {
+        this.singleFlights.delete(cacheKey);
+      }
+    });
+
+    // 记录 SingleFlight
+    this.singleFlights.set(cacheKey, {
+      promise: wrappedPromise,
+      timestamp: Date.now(),
+    });
+
+    return wrappedPromise;
+  }
+
+  private async performKlineQuery(
+    exchange: string,
+    symbol: string,
+    interval: string,
+    limit: number,
+    before: number | undefined,
+    cacheKey: string,
+  ): Promise<KlineQueryResult> {
     const requestLimit = limit + 1;
+
+    // 检查内存缓存
+    // before 参数时使用较长 TTL（历史数据不变），无 before 时使用较短 TTL（获取最新价格）
+    const cacheTTL = before !== undefined ? QUERY_CACHE_TTL : QUERY_CACHE_TTL_LATEST;
+
+    if (before !== undefined) {
+      const cached = this.queryCache.get(cacheKey);
+      if (cached && Date.now() - cached.timestamp < cacheTTL) {
+        return {
+          klines: cached.data.slice(-limit),
+          source: 'cache',
+          hasMore: true,
+        };
+      }
+    }
 
     // 1. 无 before 参数时，先查 Redis（最新数据缓存）
     if (before === undefined) {
       const redisKlines = await redisCache.getKlines(exchange, symbol, interval, requestLimit);
       if (redisKlines && redisKlines.length >= requestLimit) {
-        const hydratedRedisKlines = await this.hydrateInitialWindowWithLatestTail(
-          exchange,
-          symbol,
-          interval,
-          redisKlines,
-          requestLimit,
-        );
-        void redisCache.setKlines(exchange, symbol, interval, hydratedRedisKlines).catch(() => {});
+        const sanitizedKlines = sanitizeKlineWindow(redisKlines, interval);
+        void redisCache.setKlines(exchange, symbol, interval, sanitizedKlines).catch(() => {});
         return {
-          klines: hydratedRedisKlines.slice(-limit),
+          klines: sanitizedKlines.slice(-limit),
           source: 'cache',
           hasMore: true,
         };
@@ -62,21 +161,15 @@ export class KlineService {
     const dbWindowNeedsRemoteRepair = cleanedDbResult.length > 0 && hasWindowIntegrityIssues(cleanedDbResult, interval);
 
     if (cleanedDbResult.length >= requestLimit && !dbWindowNeedsRemoteRepair) {
-      const hydratedDbKlines = before === undefined
-        ? await this.hydrateInitialWindowWithLatestTail(
-          exchange,
-          symbol,
-          interval,
-          cleanedDbResult,
-          requestLimit,
-        )
-        : cleanedDbResult;
       // DB 命中时异步回写 Redis，避免 TTL 过期后每次都穿透到 DB
       if (before === undefined) {
-        void redisCache.setKlines(exchange, symbol, interval, hydratedDbKlines).catch(() => {});
+        void redisCache.setKlines(exchange, symbol, interval, cleanedDbResult).catch(() => {});
+      } else {
+        // 历史数据查询结果存入内存缓存（5 分钟 TTL）
+        this.queryCache.set(cacheKey, { data: cleanedDbResult, timestamp: Date.now(), key: cacheKey });
       }
       return {
-        klines: hydratedDbKlines.slice(-limit),
+        klines: cleanedDbResult.slice(-limit),
         source: 'cache',
         hasMore: true,
       };
@@ -95,6 +188,11 @@ export class KlineService {
       // 异步持久化，不阻塞返回
       this.persistKlines(exchange, symbol, interval, remoteKlines, mergedKlines, hasMore).catch(() => {});
 
+      // 历史数据查询结果存入内存缓存（5 分钟 TTL）
+      if (before !== undefined) {
+        this.queryCache.set(cacheKey, { data: mergedKlines, timestamp: Date.now(), key: cacheKey });
+      }
+
       return {
         klines: mergedKlines.slice(-limit),
         source: 'remote',
@@ -104,6 +202,9 @@ export class KlineService {
 
     // 4. 兜底：返回 DB 查询结果（即使不足）
     if (cleanedDbResult.length > 0) {
+      if (before !== undefined) {
+        this.queryCache.set(cacheKey, { data: cleanedDbResult, timestamp: Date.now(), key: cacheKey });
+      }
       return {
         klines: cleanedDbResult.slice(-limit),
         source: 'cache',
@@ -241,28 +342,6 @@ export class KlineService {
       console.warn(`DB unavailable for latest cached kline ${exchange}:${symbol}:${interval}: ${error.message}`);
       return this.fetchLatestRemoteKline(exchange, symbol, interval);
     }
-  }
-
-  private async hydrateInitialWindowWithLatestTail(
-    exchange: string,
-    symbol: string,
-    interval: string,
-    klines: Kline[],
-    limit: number,
-  ): Promise<Kline[]> {
-    if (klines.length === 0) {
-      return klines;
-    }
-
-    const latestTail = await this.getLatestCachedKline(exchange, symbol, interval);
-    if (!latestTail) {
-      return sanitizeKlineWindow(normalizeKlines(klines), interval).slice(-limit);
-    }
-
-    return sanitizeKlineWindow(
-      normalizeKlines([...klines, latestTail]),
-      interval,
-    ).slice(-limit);
   }
 
   private async fetchLatestRemoteKline(

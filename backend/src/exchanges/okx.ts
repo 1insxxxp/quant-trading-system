@@ -8,6 +8,7 @@ import {
 } from '../network/exchange-transport.js';
 import { isBenignCloseBeforeConnectError, safeCloseWebSocket } from './websocket-close.js';
 import type { ExchangeAdapter, Kline, SymbolInfo, TradeTick } from '../types/index.js';
+import { validateKlines } from '../lib/kline-validator.js';
 
 type HttpGet = typeof axios.get;
 type WebSocketCtor = typeof WebSocket;
@@ -73,7 +74,7 @@ export class OKXAdapter implements ExchangeAdapter {
         }),
       );
 
-      return response.data.data.map((item: string[]) => {
+      const rawKlines = response.data.data.map((item: string[]) => {
         const openTime = Number(item[0]);
         const closeTime = openTime + this.getIntervalMs(interval);
 
@@ -93,6 +94,15 @@ export class OKXAdapter implements ExchangeAdapter {
           is_closed: resolveOkxRestKlineClosedState(item, closeTime),
         };
       });
+
+      // 校验并过滤无效数据
+      const { klines: validKlines, invalidCount } = validateKlines(rawKlines);
+
+      if (invalidCount > 0) {
+        console.warn(`OKX getKlines: filtered ${invalidCount} invalid klines out of ${rawKlines.length}`);
+      }
+
+      return validKlines;
     } catch (error: any) {
       console.error('OKX getKlines error:', error.message);
       throw new Error(`OKX API error: ${error.message}`);

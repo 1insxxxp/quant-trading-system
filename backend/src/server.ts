@@ -17,6 +17,7 @@ const WS_PORT = Number(process.env.WS_PORT ?? 4001);
 const DEFAULT_INITIAL_KLINE_LIMIT = 2000;
 const DEFAULT_HISTORY_PAGE_SIZE = 1000;
 const APP_VERSION = process.env.APP_VERSION ?? process.env.npm_package_version ?? 'dev';
+const USE_MOCK_FUNDING_RATE = process.env.USE_MOCK_FUNDING_RATE === 'true';
 const DEFAULT_INDICATOR_SETTINGS: ChartIndicatorSettings = {
   volume: false,
   ma5: false,
@@ -126,6 +127,61 @@ app.get('/api/symbols', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message,
+    });
+  }
+});
+
+app.get('/api/funding-rate', async (req, res) => {
+  try {
+    const { exchange, symbol } = req.query;
+
+    if (!exchange || !symbol) {
+      res.status(400).json({
+        success: false,
+        error: 'Missing required query params: exchange, symbol',
+      });
+      return;
+    }
+
+    // Return mock data in development if enabled
+    if (USE_MOCK_FUNDING_RATE) {
+      res.json({
+        success: true,
+        fundingRate: {
+          exchange: 'binance',
+          symbol: symbol as string,
+          fundingRate: 0.0001 + Math.random() * 0.0002,
+          fundingTimestamp: Date.now(),
+          nextFundingTimestamp: Date.now() + 8 * 60 * 60 * 1000,
+          markPrice: 2000 + Math.random() * 100,
+          indexPrice: 2000 + Math.random() * 100,
+        },
+      });
+      return;
+    }
+
+    let fundingRate: any;
+    if (exchange === 'binance') {
+      const binance = new BinanceAdapter();
+      fundingRate = await binance.getFundingRate(symbol as string);
+    } else {
+      res.status(400).json({
+        success: false,
+        error: `Unsupported exchange: ${exchange}`,
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      fundingRate,
+    });
+  } catch (error: any) {
+    console.error('Failed to load funding rate:', error.message);
+    res.status(200).json({
+      success: false,
+      error: error.message,
+      fundingRate: null,
     });
   }
 });

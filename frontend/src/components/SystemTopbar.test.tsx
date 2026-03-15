@@ -5,6 +5,7 @@ import type { SymbolOption } from '../types';
 
 const mockMarketState = {
   isConnected: true,
+  realtimeUpdateState: 'connected' as const,
   exchange: 'binance',
   symbol: 'ETHUSDT',
   symbols: [

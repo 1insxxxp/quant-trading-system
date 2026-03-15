@@ -19,7 +19,7 @@ describe('chart workspace theme styles', () => {
     const metricsBlock = css.match(/\.chart-inspector__metrics\s*\{[^}]*\}/);
 
     expect(inspectorBlock?.[0]).toContain('background: transparent;');
-    expect(metricsBlock?.[0]).toContain('gap: 6px 10px;');
+    expect(metricsBlock?.[0]).toContain('gap: 8px;');
     expect(css).toContain('.chart-inspector__metric-value');
     expect(css).toContain('font-variant-numeric: tabular-nums;');
   });
@@ -27,7 +27,8 @@ describe('chart workspace theme styles', () => {
   it('uses structured grid styling for the topbar meta cluster', () => {
     const metaBlock = css.match(/\.system-topbar__meta\s*\{[^}]*\}/);
 
-    expect(metaBlock?.[0]).toContain('display: grid;');
+    expect(metaBlock?.[0]).toContain('grid-template-areas:');
+    expect(metaBlock?.[0]).toContain('grid-template-columns:');
   });
 
   it('positions the volume legend against the volume pane', () => {
@@ -35,5 +36,10 @@ describe('chart workspace theme styles', () => {
 
     expect(legendBlock?.[0]).toContain('top: calc(78% + 12px);');
     expect(legendBlock?.[0]).toContain('left: 18px;');
+  });
+
+  it('styles the detached realtime badge like the terminal hud instead of a solid price pill', () => {
+    expect(css).not.toContain('.chart-realtime-badge');
+    expect(css).not.toContain('.chart-realtime-badge__countdown');
   });
 });

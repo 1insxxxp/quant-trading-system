@@ -1,4 +1,5 @@
 import React from 'react';
+import type { FundingRate } from '../types';
 
 export interface ChartInspectorSnapshot {
   open: number;
@@ -12,6 +13,8 @@ export interface ChartInspectorSnapshot {
 interface ChartInspectorProps {
   marketLabel: string;
   snapshot: ChartInspectorSnapshot | null;
+  fundingRate?: FundingRate | null;
+  isLoadingFundingRate?: boolean;
 }
 
 function formatValue(value: number): string {
@@ -53,7 +56,32 @@ function renderMetric(params: {
   );
 }
 
-export const ChartInspector: React.FC<ChartInspectorProps> = ({ marketLabel, snapshot }) => {
+function formatFundingRate(rate: number): string {
+  return `${rate >= 0 ? '+' : ''}${(rate * 100).toFixed(4)}%`;
+}
+
+function formatFundingTime(timestamp: number): string {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diffMs = timestamp - now.getTime();
+  const diffMins = Math.round(diffMs / (1000 * 60));
+  const diffHours = Math.round(diffMs / (1000 * 60 * 60));
+
+  if (diffMins < 60) {
+    return `${diffMins} 分钟后`;
+  } else if (diffHours < 24) {
+    return `${diffHours} 小时后`;
+  } else {
+    return date.toLocaleString('zh-CN', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+}
+
+export const ChartInspector: React.FC<ChartInspectorProps> = ({ marketLabel, snapshot, fundingRate, isLoadingFundingRate }) => {
   if (!snapshot) {
     return (
       <aside className="chart-inspector">
@@ -79,6 +107,24 @@ export const ChartInspector: React.FC<ChartInspectorProps> = ({ marketLabel, sna
           tone: direction,
           wide: true,
         })}
+        {fundingRate ? (
+          <span className="chart-inspector__funding-rate">
+            <span className="chart-inspector__funding-rate-label">资金费率</span>
+            <span className={`chart-inspector__funding-rate-value chart-inspector__funding-rate-value--${fundingRate.fundingRate >= 0 ? 'up' : 'down'}`}>
+              {formatFundingRate(fundingRate.fundingRate)}
+            </span>
+            {fundingRate.nextFundingTimestamp && (
+              <span className="chart-inspector__funding-time">
+                下次：{formatFundingTime(fundingRate.nextFundingTimestamp)}
+              </span>
+            )}
+          </span>
+        ) : isLoadingFundingRate ? (
+          <span className="chart-inspector__funding-rate">
+            <span className="chart-inspector__funding-rate-label">资金费率</span>
+            <span className="chart-inspector__funding-rate-value">加载中...</span>
+          </span>
+        ) : null}
       </div>
     </aside>
   );
