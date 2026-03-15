@@ -1158,7 +1158,7 @@ input[type='checkbox'] {
 
 /* Panel with Search */
 .market-select__panel--with-search {
-  padding-top: 4px;
+  padding-top: 2px;
 }
 
 /* Search Input */
@@ -1166,8 +1166,8 @@ input[type='checkbox'] {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
-  margin-bottom: 4px;
+  padding: 8px 8px 6px;
+  margin-bottom: 2px;
   border-bottom: 1px solid rgba(167, 191, 223, 0.1);
 }
 
