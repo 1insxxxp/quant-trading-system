@@ -25,6 +25,9 @@ export const DEFAULT_INDICATOR_SETTINGS: IndicatorSettings = {
 const DEFAULT_SYMBOLS: SymbolOption[] = [
   { value: 'BTCUSDT', label: 'BTC/USDT', baseAsset: 'BTC', quoteAsset: 'USDT' },
   { value: 'ETHUSDT', label: 'ETH/USDT', baseAsset: 'ETH', quoteAsset: 'USDT' },
+  { value: 'SOLUSDT', label: 'SOL/USDT', baseAsset: 'SOL', quoteAsset: 'USDT' },
+  { value: 'BNBUSDT', label: 'BNB/USDT', baseAsset: 'BNB', quoteAsset: 'USDT' },
+  { value: 'XRPUSDT', label: 'XRP/USDT', baseAsset: 'XRP', quoteAsset: 'USDT' },
 ];
 
 const DEFAULT_MARKET_SELECTION = {
