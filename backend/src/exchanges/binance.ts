@@ -182,6 +182,13 @@ export class BinanceAdapter implements ExchangeAdapter {
   }
 
   async getSymbols(): Promise<SymbolInfo[]> {
+    // 主流币种列表（按市值和流动性排序）
+    const POPULAR_BASE_ASSETS = [
+      'BTC', 'ETH', 'BNB', 'SOL', 'XRP',
+      'ADA', 'DOGE', 'DOT', 'MATIC', 'LTC',
+      'SHIB', 'TRX', 'AVAX', 'UNI', 'LINK',
+    ];
+
     try {
       const response = await runTransportAttempts(
         createTransportAttempts(this.transportConfig.rest, this.transportConfig.proxyUrl),
@@ -195,7 +202,7 @@ export class BinanceAdapter implements ExchangeAdapter {
 
       return response.data.symbols
         .filter((item: any) => item.quoteAsset === 'USDT' && item.status === 'TRADING')
-        .filter((item: any) => ['BTC', 'ETH'].includes(item.baseAsset))
+        .filter((item: any) => POPULAR_BASE_ASSETS.includes(item.baseAsset))
         .map((item: any) => ({
           exchange: 'binance',
           symbol: item.symbol,

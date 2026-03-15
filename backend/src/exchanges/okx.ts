@@ -227,6 +227,13 @@ export class OKXAdapter implements ExchangeAdapter {
   }
 
   async getSymbols(): Promise<SymbolInfo[]> {
+    // 主流币种列表（按市值和流动性排序）
+    const POPULAR_BASE_ASSETS = [
+      'BTC', 'ETH', 'BNB', 'SOL', 'XRP',
+      'ADA', 'DOGE', 'DOT', 'MATIC', 'LTC',
+      'SHIB', 'TRX', 'AVAX', 'UNI', 'LINK',
+    ];
+
     try {
       const response = await runTransportAttempts(
         createTransportAttempts(this.transportConfig.rest, this.transportConfig.proxyUrl),
@@ -243,7 +250,7 @@ export class OKXAdapter implements ExchangeAdapter {
 
       return response.data.data
         .filter((item: any) => item.quoteCcy === 'USDT' && item.state === 'live')
-        .filter((item: any) => ['BTC', 'ETH'].includes(item.baseCcy))
+        .filter((item: any) => POPULAR_BASE_ASSETS.includes(item.baseCcy))
         .map((item: any) => ({
           exchange: 'okx',
           symbol: item.instId.replace('-', ''),
