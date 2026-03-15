@@ -4528,7 +4528,8 @@ body::after {
 }
 
 .connection-status__indicator--waiting,
-.connection-status__indicator--disconnected {
+.connection-status__indicator--disconnected,
+.connection-status__indicator--unknown {
   background: #6b7280;
   box-shadow: 0 0 6px rgba(107, 114, 128, 0.3);
 }
