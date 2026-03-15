@@ -11,17 +11,14 @@ import {
 } from 'lightweight-charts';
 import { formatMarketSymbol } from '../lib/marketDisplay';
 import {
-  formatChartCountdown,
   formatChartCrosshairTime,
   formatChartIntervalLabel,
   formatChartVolumeLegendValue,
-  resolveCurrentCandleCountdownLabel,
   resolveTimestampFromChartTime,
 } from '../lib/chartTimeFormat';
 import { useMarketStore } from '../stores/marketStore';
 import { type ThemeMode, useUiStore } from '../stores/uiStore';
 import { ChartInspector, type ChartInspectorSnapshot } from './ChartInspector';
-import { RollingDigits } from './RollingDigits';
 import { Toolbar } from './Toolbar';
 import {
   buildCandlestickData,
@@ -38,15 +35,6 @@ const MIN_CHART_HEIGHT = 460;
 const MIN_DEFAULT_VISIBLE_BARS = 80;
 const DEFAULT_RIGHT_PADDING_BARS = 6;
 const LOADING_SIGNAL_BARS = Array.from({ length: 12 }, (_, index) => index);
-const DETACHED_REALTIME_BADGE_HALF_HEIGHT = 20;
-const DETACHED_REALTIME_BADGE_SAFE_MARGIN = 14;
-
-interface DetachedRealtimeBadgeState {
-  top: number;
-  priceLabel: string;
-  countdownLabel: string;
-  tone: 'up' | 'down';
-}
 
 export const KlineChart: React.FC = () => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -66,7 +54,6 @@ export const KlineChart: React.FC = () => {
   const previousMarketKeyRef = useRef<string | null>(null);
   const isHistoryPagingReadyRef = useRef(false);
   const [hoveredKline, setHoveredKline] = useState<Kline | null>(null);
-  const [detachedRealtimeBadge, setDetachedRealtimeBadge] = useState<DetachedRealtimeBadgeState | null>(null);
   const theme = useUiStore((state) => state.theme);
   const isCrosshairMagnetEnabled = useUiStore((state) => state.isCrosshairMagnetEnabled);
 
@@ -82,6 +69,10 @@ export const KlineChart: React.FC = () => {
     indicatorSettings,
     updateIndicatorSetting,
     retryLoadOlderKlines,
+    fundingRate,
+    isLoadingFundingRate,
+    fetchFundingRate,
+    klineLoadState,
   } = useMarketStore();
 
   themeRef.current = theme;
@@ -111,7 +102,6 @@ export const KlineChart: React.FC = () => {
         candleSeries.removePriceLine(realtimePriceLineRef.current);
         realtimePriceLineRef.current = null;
       }
-      setDetachedRealtimeBadge((current) => (current ? null : current));
       return;
     }
 
@@ -120,45 +110,6 @@ export const KlineChart: React.FC = () => {
     const isUp = latestKline ? latestPriceRef.current >= latestKline.open : true;
     const tone = isUp ? 'up' : 'down';
     const lineColor = tone === 'up' ? currentTheme.candleUpColor : currentTheme.candleDownColor;
-    const priceCoordinate = candleSeries.priceToCoordinate(latestPriceRef.current);
-    const containerHeight = chartContainerRef.current?.clientHeight ?? 0;
-    const countdownLabel = resolveCurrentCandleCountdownLabel({
-      interval,
-      latestKline,
-    }) ?? formatChartCountdown(0);
-
-    if (priceCoordinate === null || containerHeight <= 0) {
-      setDetachedRealtimeBadge((current) => (current ? null : current));
-      return;
-    }
-
-    const clampedTop = clampNumber(
-      Number(priceCoordinate),
-      DETACHED_REALTIME_BADGE_SAFE_MARGIN + DETACHED_REALTIME_BADGE_HALF_HEIGHT,
-      Math.max(
-        DETACHED_REALTIME_BADGE_SAFE_MARGIN + DETACHED_REALTIME_BADGE_HALF_HEIGHT,
-        containerHeight - DETACHED_REALTIME_BADGE_SAFE_MARGIN - DETACHED_REALTIME_BADGE_HALF_HEIGHT,
-      ),
-    );
-    const nextBadge: DetachedRealtimeBadgeState = {
-      top: clampedTop,
-      priceLabel: formatPriceLabel(latestPriceRef.current),
-      countdownLabel,
-      tone,
-    };
-    setDetachedRealtimeBadge((current) => {
-      if (
-        current &&
-        current.top === nextBadge.top &&
-        current.priceLabel === nextBadge.priceLabel &&
-        current.countdownLabel === nextBadge.countdownLabel &&
-        current.tone === nextBadge.tone
-      ) {
-        return current;
-      }
-
-      return nextBadge;
-    });
 
     const options = {
       id: 'detached-realtime-price',
@@ -167,7 +118,7 @@ export const KlineChart: React.FC = () => {
       lineWidth: 1 as const,
       lineStyle: LineStyle.Dashed,
       lineVisible: true,
-      axisLabelVisible: false,
+      axisLabelVisible: true,
       axisLabelColor: lineColor,
       axisLabelTextColor: themeRef.current === 'light' ? '#f8fbff' : '#07101d',
       title: '',
@@ -179,7 +130,7 @@ export const KlineChart: React.FC = () => {
     }
 
     realtimePriceLineRef.current = candleSeries.createPriceLine(options);
-  }, [interval]);
+  }, [interval, theme]);
 
   useEffect(() => {
     if (!chartContainerRef.current) {
@@ -213,9 +164,40 @@ export const KlineChart: React.FC = () => {
         borderColor: initialTheme.scaleBorderColor,
         timeVisible: true,
         secondsVisible: false,
+        fixLeftEdge: false,
+        fixRightEdge: false,
+        lockVisibleTimeRange: false,
       },
       rightPriceScale: {
         borderColor: initialTheme.scaleBorderColor,
+        autoScale: true,  // 启用自动缩放以确保正确显示
+        autoScaleMargin: 8,
+        scaleMargins: {
+          top: 0.1,
+          bottom: 0.2,
+        },
+      },
+      handleScale: {
+        axisPressedMouseMove: {
+          time: false,      // 禁用时间轴拖动
+          price: true,      // 启用价格轴拖动
+        },
+        axisDoubleClickReset: {
+          time: false,
+          price: true,
+        },
+        mouseWheel: true,
+        pinch: true,
+      },
+      handleScroll: {
+        axisPressedMouseMove: {
+          time: true,       // 允许时间轴拖动
+          price: true,      // 允许价格轴拖动
+        },
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: true,  // 启用垂直触摸拖动
       },
     });
 
@@ -225,10 +207,17 @@ export const KlineChart: React.FC = () => {
       borderVisible: false,
       wickUpColor: initialTheme.candleUpColor,
       wickDownColor: initialTheme.candleDownColor,
+      priceScaleId: 'right',
     });
     const volumeSeries = chart.addHistogramSeries({
       priceFormat: { type: 'volume' },
       priceScaleId: '',
+      color: '#26a69a',
+      lastValueVisible: false,
+      priceLineVisible: false,
+      lineColor: '#26a69a',
+      topColor: 'rgba(38, 166, 154, 0.3)',
+      bottomColor: 'rgba(38, 166, 154, 0.05)',
     });
     const ma5Series = chart.addLineSeries({
       color: initialTheme.ma5Color,
@@ -251,8 +240,17 @@ export const KlineChart: React.FC = () => {
 
     volumeSeries.priceScale().applyOptions({
       scaleMargins: {
-        top: 0.78,
+        top: 0.75,    // 主图占 75%，副图占 25%
         bottom: 0,
+      },
+      invertScale: false,
+    });
+
+    // 为主图价格轴设置边距，与副图区分
+    candleSeries.priceScale().applyOptions({
+      scaleMargins: {
+        top: 0.1,
+        bottom: 0.25,  // 底部留出 25% 给成交量副图
       },
     });
 
@@ -331,12 +329,11 @@ export const KlineChart: React.FC = () => {
       previousMarketKeyRef.current = null;
       chartDataRef.current = [];
       visibleLogicalRangeRef.current = null;
-      setDetachedRealtimeBadge(null);
       if (realtimePriceLineRef.current && candleSeriesRef.current) {
         candleSeriesRef.current.removePriceLine(realtimePriceLineRef.current);
-        realtimePriceLineRef.current = null;
-      }
-      chart.remove();
+      realtimePriceLineRef.current = null;
+    }
+    chart.remove();
     };
   }, []);
 
@@ -360,6 +357,34 @@ export const KlineChart: React.FC = () => {
       },
       rightPriceScale: {
         borderColor: nextTheme.scaleBorderColor,
+        autoScale: true,
+        autoScaleMargin: 8,
+        scaleMargins: {
+          top: 0.1,
+          bottom: 0.2,
+        },
+      },
+      handleScale: {
+        axisPressedMouseMove: {
+          time: false,
+          price: true,
+        },
+        axisDoubleClickReset: {
+          time: false,
+          price: true,
+        },
+        mouseWheel: true,
+        pinch: true,
+      },
+      handleScroll: {
+        axisPressedMouseMove: {
+          time: true,
+          price: true,
+        },
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: true,
       },
     });
 
@@ -432,6 +457,13 @@ export const KlineChart: React.FC = () => {
       chartRef.current?.timeScale().setVisibleLogicalRange({
         from: startIndex,
         to: data.length - 1 + DEFAULT_RIGHT_PADDING_BARS,
+      });
+
+      // 数据加载完成后禁用自动缩放，允许自由拖动
+      chartRef.current?.applyOptions({
+        rightPriceScale: {
+          autoScale: false,
+        },
       });
 
       isHistoryPagingReadyRef.current = true;
@@ -509,18 +541,12 @@ export const KlineChart: React.FC = () => {
   }, [latestPrice]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      syncDetachedRealtimePriceLine();
-    }, 1000);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [syncDetachedRealtimePriceLine]);
-
-  useEffect(() => {
     setHoveredKline(null);
   }, [exchange, symbol, interval]);
+
+  useEffect(() => {
+    void fetchFundingRate();
+  }, [exchange, symbol]);
 
   const legendItems = buildIndicatorLegend(klines, indicatorSettings);
   const activeKline = hoveredKline ?? klines[klines.length - 1] ?? null;
@@ -544,12 +570,16 @@ export const KlineChart: React.FC = () => {
 
       <div className={`chart-panel__body ${isLoadingKlines ? 'chart-panel__body--loading' : ''}`}>
         <div className="chart-panel__body-frame" />
+        {/* 成交量副图背景区域 */}
+        <div className="chart-panel__volume-bg" aria-hidden="true" />
         {!isLoadingKlines ? (
           <>
             <div className="chart-panel__hud chart-panel__hud--terminal">
               <ChartInspector
                 marketLabel={inspectorMarketLabel}
                 snapshot={activeSnapshot}
+                fundingRate={fundingRate}
+                isLoadingFundingRate={isLoadingFundingRate}
               />
               {legendItems.length > 0 ? (
                 <div className="chart-panel__hud-legend">
@@ -619,46 +649,35 @@ export const KlineChart: React.FC = () => {
         <div
           ref={chartContainerRef}
           data-testid="kline-chart"
-          className={`chart-canvas ${isLoadingKlines ? 'chart-canvas--dimmed' : ''}`}
+          className={`chart-canvas ${(isLoadingKlines || klineLoadState === 'loading') ? 'chart-canvas--dimmed' : ''}`}
         />
 
-        {detachedRealtimeBadge ? (
-          <div
-            className={`chart-realtime-badge chart-realtime-badge--${detachedRealtimeBadge.tone}`}
-            style={{ top: `${detachedRealtimeBadge.top}px` }}
-            aria-live="polite"
-          >
-            <strong className="chart-realtime-badge__price">
-              <RollingDigits
-                value={detachedRealtimeBadge.priceLabel}
-                className="chart-realtime-badge__digits"
-              />
-            </strong>
-            <span className="chart-realtime-badge__countdown">
-              <RollingDigits
-                value={detachedRealtimeBadge.countdownLabel}
-                className="chart-realtime-badge__digits rolling-digits--clock chart-realtime-badge__digits--countdown"
-              />
-            </span>
-          </div>
-        ) : null}
-
-        {isLoadingKlines ? (
+        {klineLoadState === 'loading' ? (
           <div className="chart-overlay chart-overlay--loading">
             <div className="chart-loading-signal" aria-hidden="true">
               {LOADING_SIGNAL_BARS.map((barIndex) => (
                 <span key={barIndex} className="chart-loading-signal__bar" />
               ))}
             </div>
+            <div className="chart-loading-text">
+              <span className="chart-loading-text__title">正在加载行情数据</span>
+              <span className="chart-loading-text__subtitle">
+                正在从 {exchange.toUpperCase()} 获取 {symbol} K 线数据...
+              </span>
+            </div>
+          </div>
+        ) : klineLoadState === 'error' ? (
+          <div className="chart-overlay chart-overlay--error">
+            <div className="chart-error-icon" aria-hidden="true">!</div>
+            <div className="chart-loading-text">
+              <span className="chart-loading-text__title chart-loading-text__title--error">数据加载失败</span>
+              <span className="chart-loading-text__subtitle">
+                无法从 {exchange.toUpperCase()} 获取数据，请检查网络连接或切换其他市场
+              </span>
+            </div>
           </div>
         ) : null}
 
-        {!isLoadingKlines && klines.length === 0 ? (
-          <div className="chart-overlay">
-            <strong>{'等待市场数据'}</strong>
-            <span>{'当前筛选条件下没有可用 K 线，请稍后重试或切换市场。'}</span>
-          </div>
-        ) : null}
       </div>
     </section>
   );
@@ -736,15 +755,4 @@ function resolveKlineFromCrosshair(params: {
   }
 
   return klines.find((item) => item.open_time === hoveredTimestamp) ?? klines[klines.length - 1] ?? null;
-}
-
-function formatPriceLabel(value: number): string {
-  return value.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-function clampNumber(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
 }

@@ -20,7 +20,23 @@ export function buildCandlestickData(klines: Kline[]): CandlestickData[] {
 
   const normalized = [...deduped.values()];
 
-  if (normalized.length <= 1) {
+  if (normalized.length === 0) {
+    return [];
+  }
+
+  if (normalized.length === 1) {
+    return [{
+      time: (normalized[0].open_time / 1000) as CandlestickData['time'],
+      open: normalized[0].open,
+      high: normalized[0].high,
+      low: normalized[0].low,
+      close: normalized[0].close,
+    }];
+  }
+
+  const intervalMs = resolveIntervalMs(normalized);
+
+  if (intervalMs <= 0) {
     return normalized.map((kline) => ({
       time: (kline.open_time / 1000) as CandlestickData['time'],
       open: kline.open,
@@ -30,37 +46,66 @@ export function buildCandlestickData(klines: Kline[]): CandlestickData[] {
     }));
   }
 
-  const intervalMs = resolveIntervalMs(normalized);
-  const filled: CandlestickData[] = [];
+  // 对齐到时间网格
+  const firstTime = normalized[0].open_time;
+  const lastTime = normalized[normalized.length - 1].open_time;
 
-  normalized.forEach((kline, index) => {
-    filled.push({
+  // 计算理论上的起始时间（向下对齐到 interval 边界）
+  const alignedFirstTime = Math.floor(firstTime / intervalMs) * intervalMs;
+
+  // 计算需要的数据点数量
+  const expectedCount = Math.floor((lastTime - alignedFirstTime) / intervalMs) + 1;
+
+  // 限制最大填充数量，避免内存问题
+  const maxAllowedPoints = normalized.length * 3 + 100;
+
+  // 如果理论数量远大于实际数量，说明间隔计算可能有误，直接返回原始数据
+  if (expectedCount > maxAllowedPoints) {
+    return normalized.map((kline) => ({
       time: (kline.open_time / 1000) as CandlestickData['time'],
       open: kline.open,
       high: kline.high,
       low: kline.low,
       close: kline.close,
-    });
+    }));
+  }
 
-    const next = normalized[index + 1];
-    if (!next || intervalMs <= 0) {
-      return;
-    }
+  // 创建时间到 K 线的映射
+  const timeToKline = new Map<number, Kline>();
+  for (const kline of normalized) {
+    timeToKline.set(kline.open_time, kline);
+  }
 
-    let cursor = kline.open_time + intervalMs;
-    while (cursor < next.open_time) {
-      filled.push({
-        time: (cursor / 1000) as CandlestickData['time'],
-        open: kline.close,
-        high: kline.close,
-        low: kline.close,
+  // 生成完整的 K 线序列
+  const result: CandlestickData[] = [];
+  let prevClose: number | null = null;
+
+  for (let i = 0; i < expectedCount; i++) {
+    const targetTime = alignedFirstTime + i * intervalMs;
+    const kline = timeToKline.get(targetTime);
+
+    if (kline) {
+      result.push({
+        time: (targetTime / 1000) as CandlestickData['time'],
+        open: kline.open,
+        high: kline.high,
+        low: kline.low,
         close: kline.close,
       });
-      cursor += intervalMs;
+      prevClose = kline.close;
+    } else if (prevClose !== null) {
+      // 使用前置收盘价填充缺失的 K 线
+      result.push({
+        time: (targetTime / 1000) as CandlestickData['time'],
+        open: prevClose,
+        high: prevClose,
+        low: prevClose,
+        close: prevClose,
+      });
     }
-  });
+  }
 
-  return filled;
+  return result;
 }
 
 export function resolveChartUpdateMode(params: {
@@ -260,14 +305,17 @@ function isSameCandlestickPoint(
 }
 
 function resolveIntervalMs(klines: Kline[]): number {
-  const fromWindow = klines[0]
-    ? Math.max(0, (klines[0].close_time - klines[0].open_time) + 1)
-    : 0;
-
-  if (fromWindow > 0) {
-    return fromWindow;
+  // 优先从已闭合 K 线的窗口计算间隔
+  for (const kline of klines) {
+    if (kline.is_closed === 1) {
+      const windowMs = kline.close_time - kline.open_time + 1;
+      if (windowMs > 0) {
+        return windowMs;
+      }
+    }
   }
 
+  // 如果没有已闭合 K 线，从相邻 K 线的 open_time 差值计算
   for (let index = 1; index < klines.length; index += 1) {
     const gap = klines[index].open_time - klines[index - 1].open_time;
     if (gap > 0) {

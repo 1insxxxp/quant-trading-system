@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import { formatMarketSymbol } from '../lib/marketDisplay.js';
 import type {
+  FundingRate,
   IndicatorId,
   IndicatorSettings,
   Kline,
+  KlineLoadState,
   KlineSource,
   MarketState,
   SymbolOption,
@@ -29,9 +31,22 @@ const DEFAULT_MARKET_SELECTION = {
   symbol: 'BTCUSDT',
   interval: '1h',
 } as const;
-const INITIAL_KLINE_LIMIT = 2000;
+const INITIAL_KLINE_LIMIT = 500;
 const OLDER_KLINE_PAGE_SIZE = 1000;
 const DEFAULT_OLDER_KLINE_LOAD_ERROR = '加载历史K线失败，请重试。';
+
+// K 线缓存：按 (exchange, symbol, interval) 存储已加载的 K 线数据
+// 当用户切换周期后再返回时可以直接使用缓存，避免重复请求
+interface KlineCacheEntry {
+  klines: Kline[];
+  source: KlineSource;
+  latestPrice: number | null;
+  lastPriceTimestamp: number | null;
+  hasMoreHistoricalKlines: boolean;
+  timestamp: number;
+}
+const KLINE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟缓存
+const klineCache = new Map<string, KlineCacheEntry>();
 
 interface BackendSymbol {
   exchange?: string;
@@ -61,6 +76,12 @@ interface BackendIndicatorSettingsResponse {
   error?: string;
 }
 
+interface BackendFundingRateResponse {
+  success: boolean;
+  fundingRate?: FundingRate;
+  error?: string;
+}
+
 export function getMarketKey(exchange: string, symbol: string, interval: string): string {
   return `${exchange}:${symbol}:${interval}`;
 }
@@ -85,6 +106,10 @@ export const useMarketStore = create<MarketState>((set, get) => ({
   indicatorSettings: { ...DEFAULT_INDICATOR_SETTINGS },
   isLoadingIndicatorSettings: false,
   indicatorPreferencesUnavailable: false,
+  fundingRate: null,
+  isLoadingFundingRate: false,
+  klineLoadState: 'idle',
+  realtimeUpdateState: 'disconnected',
 
   setExchange: (exchange: string) => {
     set((state) => {
@@ -100,13 +125,20 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         klineSource: 'empty',
         latestPrice: null,
         lastPriceTimestamp: null,
+        klineLoadState: 'loading',
         isLoadingKlines: true,
         isLoadingOlderKlines: false,
         olderKlineLoadError: null,
         hasMoreHistoricalKlines: true,
+        fundingRate: null,
       };
     });
     void get().fetchSymbols();
+    void get().fetchFundingRate();
+    // 等待 fetchSymbols 完成后加载 K 线数据
+    setTimeout(() => {
+      void get().loadInitialKlines();
+    }, 0);
   },
 
   setSymbol: (symbol: string) => {
@@ -123,6 +155,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         klineSource: 'empty',
         latestPrice: null,
         lastPriceTimestamp: null,
+        klineLoadState: 'loading',
         isLoadingKlines: true,
         isLoadingOlderKlines: false,
         olderKlineLoadError: null,
@@ -130,36 +163,67 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       };
     });
     void get().loadInitialKlines();
+    void get().fetchFundingRate();
   },
 
   setInterval: (interval: string) => {
-    set((state) => {
-      writePersistedMarketSelection({
-        exchange: state.exchange,
-        symbol: state.symbol,
-        interval,
-      });
+    const { exchange, symbol } = get();
+    const cacheKey = getMarketKey(exchange, symbol, interval);
+    const cached = klineCache.get(cacheKey);
+    const now = Date.now();
+    const isCacheValid = cached && (now - cached.timestamp < KLINE_CACHE_TTL_MS);
 
-      return {
+    // 如果有有效的缓存，直接使用缓存数据
+    if (isCacheValid && cached.klines.length > 0) {
+      set({
         interval,
-        klines: [],
-        klineSource: 'empty',
-        latestPrice: null,
-        lastPriceTimestamp: null,
-        isLoadingKlines: true,
+        klines: cached.klines,
+        klineSource: cached.source,
+        latestPrice: cached.latestPrice,
+        lastPriceTimestamp: cached.lastPriceTimestamp,
+        klineLoadState: 'loaded',
+        isLoadingKlines: false,
         isLoadingOlderKlines: false,
         olderKlineLoadError: null,
-        hasMoreHistoricalKlines: true,
-      };
+        hasMoreHistoricalKlines: cached.hasMoreHistoricalKlines,
+      });
+      writePersistedMarketSelection({
+        exchange,
+        symbol,
+        interval,
+      });
+      return;
+    }
+
+    // 缓存未命中，先设置加载状态，再加载数据
+    set({
+      interval,
+      klines: [],
+      klineSource: 'empty',
+      latestPrice: null,
+      lastPriceTimestamp: null,
+      klineLoadState: 'loading',
+      isLoadingKlines: true,
+      isLoadingOlderKlines: false,
+      olderKlineLoadError: null,
+      hasMoreHistoricalKlines: true,
+    });
+    writePersistedMarketSelection({
+      exchange,
+      symbol,
+      interval,
     });
     void get().loadInitialKlines();
   },
 
   setKlines: (klines: Kline[]) => {
     const normalizedKlines = normalizeKlines(klines);
+    // 临时禁用验证以调试
+    // const validKlines = filterValidKlines(normalizedKlines);
+    const validKlines = normalizedKlines;
     set({
-      klines: normalizedKlines,
-      klineSource: normalizedKlines.length > 0 ? get().klineSource : 'empty',
+      klines: validKlines,
+      klineSource: validKlines.length > 0 ? get().klineSource : 'empty',
     });
   },
 
@@ -175,7 +239,22 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         return state;
       }
 
-      const nextKlines = normalizeKlines([...state.klines, ...relevantKlines]);
+      // 临时禁用验证以调试
+      // const validRelevantKlines = filterValidKlines(relevantKlines);
+      const validRelevantKlines = relevantKlines;
+      const nextKlines = normalizeKlines([...state.klines, ...validRelevantKlines]);
+      const cacheKey = getMarketKey(state.exchange, state.symbol, state.interval);
+
+      // 更新缓存
+      const cached = klineCache.get(cacheKey);
+      if (cached) {
+        klineCache.set(cacheKey, {
+          ...cached,
+          klines: nextKlines,
+          latestPrice: nextKlines[nextKlines.length - 1]?.close ?? cached.latestPrice,
+          timestamp: Date.now(),
+        });
+      }
 
       return {
         klines: nextKlines,
@@ -186,6 +265,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
 
   updateKline: (kline: Kline) => {
     const { klines, exchange, symbol, interval } = get();
+    const cacheKey = getMarketKey(exchange, symbol, interval);
 
     if (
       kline.exchange !== exchange ||
@@ -194,6 +274,13 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     ) {
       return;
     }
+
+    // 临时禁用验证以调试
+    // const validation = validateKline(kline);
+    // if (!validation.valid) {
+    //   console.warn('Rejecting invalid realtime kline update:', validation.errors);
+    //   return;
+    // }
 
     // Skip synthetic gap placeholder candles (TradeAggregator fills time gaps with flat zero-volume candles)
     // These would corrupt existing REST API data by overwriting correct close/low values
@@ -214,17 +301,43 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       const nextKlines = [...klines];
       nextKlines[index] = mergeRealtimeKline(nextKlines[index], kline);
       nextKlines.sort((a, b) => a.open_time - b.open_time);
+      const latestPrice = nextKlines[nextKlines.length - 1]?.close ?? null;
+
+      // 更新缓存
+      const cached = klineCache.get(cacheKey);
+      if (cached) {
+        klineCache.set(cacheKey, {
+          ...cached,
+          klines: nextKlines,
+          latestPrice,
+          timestamp: Date.now(),
+        });
+      }
+
       set({
         klines: nextKlines,
-        latestPrice: nextKlines[nextKlines.length - 1]?.close ?? null,
+        latestPrice,
       });
       return;
     }
 
     const nextKlines = [...klines, kline].sort((a, b) => a.open_time - b.open_time);
+    const latestPrice = nextKlines[nextKlines.length - 1]?.close ?? null;
+
+    // 更新缓存
+    const cached = klineCache.get(cacheKey);
+    if (cached) {
+      klineCache.set(cacheKey, {
+        ...cached,
+        klines: nextKlines,
+        latestPrice,
+        timestamp: Date.now(),
+      });
+    }
+
     set({
       klines: nextKlines,
-      latestPrice: nextKlines[nextKlines.length - 1]?.close ?? null,
+      latestPrice,
     });
   },
 
@@ -249,12 +362,62 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     set({ isConnected });
   },
 
+  setKlineLoadState: (state: KlineLoadState) => {
+    set({ klineLoadState: state });
+  },
+
+  setRealtimeUpdateState: (state: 'disconnected' | 'connecting' | 'connected' | 'reconnecting') => {
+    set({ realtimeUpdateState: state });
+  },
+
+  fetchFundingRate: async () => {
+    const { exchange, symbol } = get();
+
+    if (!exchange || !symbol) {
+      return;
+    }
+
+    set({ isLoadingFundingRate: true });
+
+    try {
+      const response = await fetch(
+        `/quant/api/funding-rate?exchange=${exchange}&symbol=${symbol}`,
+      );
+      const data = await readJsonResponse<BackendFundingRateResponse>(response);
+
+      if (get().exchange !== exchange || get().symbol !== symbol) {
+        return;
+      }
+
+      if (!data.success) {
+        set({
+          fundingRate: null,
+          isLoadingFundingRate: false,
+        });
+        return;
+      }
+
+      set({
+        fundingRate: data.fundingRate ?? null,
+        isLoadingFundingRate: false,
+      });
+    } catch (error) {
+      console.error('Failed to load funding rate:', error);
+      set({
+        fundingRate: null,
+        isLoadingFundingRate: false,
+      });
+    }
+  },
+
   loadInitialKlines: async () => {
     const { exchange, symbol, interval } = get();
     const marketKey = getMarketKey(exchange, symbol, interval);
+    const cacheKey = getMarketKey(exchange, symbol, interval);
     const fetchToken = ++latestFetchToken;
 
     set({
+      klineLoadState: 'loading',
       isLoadingKlines: true,
       isLoadingOlderKlines: false,
       olderKlineLoadError: null,
@@ -275,6 +438,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       if (!initialResult.success) {
         console.error('Failed to load klines:', initialResult.error);
         set({
+          klineLoadState: 'error',
           klines: [],
           klineSource: 'empty',
           latestPrice: null,
@@ -288,59 +452,36 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       }
 
       let initialKlines = normalizeKlines(initialResult.klines ?? []);
+      // 临时禁用验证以调试
+      // let validKlines = filterValidKlines(initialKlines);
+      let validKlines = initialKlines;
       let hasMoreHistory = initialResult.hasMore ?? false;
 
-      while (
-        initialKlines.length > 0 &&
-        initialKlines.length < INITIAL_KLINE_LIMIT &&
-        hasMoreHistory
-      ) {
-        const oldestOpenTime = initialKlines[0]?.open_time;
-        if (typeof oldestOpenTime !== 'number') {
-          break;
-        }
-
-        const olderResult = await fetchKlinePage({
-          exchange,
-          symbol,
-          interval,
-          limit: INITIAL_KLINE_LIMIT - initialKlines.length,
-          before: oldestOpenTime,
-        });
-
-        if (isStaleInitialRequest(fetchToken, marketKey, get)) {
-          return;
-        }
-
-        if (!olderResult.success) {
-          break;
-        }
-
-        const olderKlines = normalizeKlines(olderResult.klines ?? []);
-        if (olderKlines.length === 0) {
-          hasMoreHistory = false;
-          break;
-        }
-
-        const nextInitialKlines = normalizeKlines([...olderKlines, ...initialKlines]);
-        if (nextInitialKlines.length === initialKlines.length) {
-          hasMoreHistory = false;
-          break;
-        }
-
-        initialKlines = nextInitialKlines;
-        hasMoreHistory = olderResult.hasMore ?? false;
-      }
+      // 移除顺序加载循环，一次性返回可用数据，避免阻塞 UI 渲染
+      // 历史数据会在用户滚动时通过 loadOlderKlines 懒加载
 
       const bufferedRealtimeKlines = getMarketKey(get().exchange, get().symbol, get().interval) === marketKey
         ? get().klines
         : [];
-      const nextKlines = normalizeKlines([...initialKlines, ...bufferedRealtimeKlines]);
+      const nextKlines = normalizeKlines([...validKlines, ...bufferedRealtimeKlines]);
       const source = resolveKlineSource(initialResult.source, nextKlines);
+      const latestPrice = nextKlines[nextKlines.length - 1]?.close ?? null;
+
+      // 缓存加载结果
+      klineCache.set(cacheKey, {
+        klines: nextKlines,
+        source,
+        latestPrice,
+        lastPriceTimestamp: null,
+        hasMoreHistoricalKlines: hasMoreHistory,
+        timestamp: Date.now(),
+      });
+
       set({
+        klineLoadState: 'loaded',
         klines: nextKlines,
         klineSource: source,
-        latestPrice: nextKlines[nextKlines.length - 1]?.close ?? null,
+        latestPrice,
         lastPriceTimestamp: null,
         isLoadingKlines: false,
         isLoadingOlderKlines: false,
@@ -354,6 +495,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
 
       console.error('Failed to load klines:', error);
       set({
+        klineLoadState: 'error',
         klines: [],
         klineSource: 'empty',
         latestPrice: null,
@@ -413,7 +555,11 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       }
 
       const olderKlines = normalizeKlines(data.klines ?? []);
-      const nextKlines = normalizeKlines([...olderKlines, ...get().klines]);
+      // 临时禁用验证以调试
+      // const validOlderKlines = filterValidKlines(olderKlines);
+      const validOlderKlines = olderKlines;
+      const nextKlines = normalizeKlines([...validOlderKlines, ...get().klines]);
+      const cacheKey = getMarketKey(get().exchange, get().symbol, get().interval);
 
       set({
         klines: nextKlines,
@@ -422,6 +568,17 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         olderKlineLoadError: null,
         hasMoreHistoricalKlines: data.hasMore ?? false,
       });
+
+      // 更新缓存
+      const cached = klineCache.get(cacheKey);
+      if (cached) {
+        klineCache.set(cacheKey, {
+          ...cached,
+          klines: nextKlines,
+          hasMoreHistoricalKlines: data.hasMore ?? false,
+          timestamp: Date.now(),
+        });
+      }
     } catch (error) {
       console.error('Failed to load older klines:', error);
       set({
@@ -451,10 +608,20 @@ export const useMarketStore = create<MarketState>((set, get) => ({
 
       const resolvedSymbol = applySymbolOptions(set, symbol, nextSymbols);
       writePersistedMarketSelection({ exchange, symbol: resolvedSymbol, interval });
+
+      // 如果 symbol 发生变化，加载新 symbol 的 K 线
+      if (resolvedSymbol !== symbol) {
+        void get().loadInitialKlines();
+      }
     } catch (error) {
       console.error('Failed to load symbols:', error);
       const resolvedSymbol = applySymbolOptions(set, symbol, []);
       writePersistedMarketSelection({ exchange, symbol: resolvedSymbol, interval });
+
+      // 如果 symbol 发生变化，加载新 symbol 的 K 线
+      if (resolvedSymbol !== symbol) {
+        void get().loadInitialKlines();
+      }
     }
   },
 
@@ -676,6 +843,7 @@ function applySymbolOptions(
     olderKlineLoadError: null,
     latestPrice: null,
     lastPriceTimestamp: null,
+    klineLoadState: 'loading',
     isLoadingKlines: true,
   });
 
