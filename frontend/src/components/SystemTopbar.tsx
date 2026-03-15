@@ -142,6 +142,8 @@ export const SystemTopbar: React.FC = () => {
             onChange={setSymbol}
             disabled={marketSymbolOptions.length === 0 || marketSymbolOptions[0]?.disabled === true}
             testId="topbar-symbol-select"
+            searchable={true}
+            placeholder="搜索交易对..."
           />
         </div>
       </div>

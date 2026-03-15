@@ -5,6 +5,8 @@ export interface MarketSelectOption {
   label: string;
   icon?: React.ReactNode;
   disabled?: boolean;
+  baseAsset?: string;
+  quoteAsset?: string;
 }
 
 interface MarketSelectProps {
@@ -15,6 +17,8 @@ interface MarketSelectProps {
   disabled?: boolean;
   initialOpen?: boolean;
   testId?: string;
+  searchable?: boolean;
+  placeholder?: string;
 }
 
 export function getNextEnabledOptionIndex(params: {
@@ -39,6 +43,84 @@ export function getNextEnabledOptionIndex(params: {
   return currentIndex;
 }
 
+/**
+ * 将中文拼音首字母转换为英文 (简易版)
+ * 支持常见交易对前缀：B=币/BTC, E=乙/ETH, S=SOL, D=狗狗币/DOT, X=XRP, C=ADA 等
+ */
+function getPinyinInitials(text: string): string {
+  const pinyinMap: Record<string, string> = {
+    // 常见中文数字和/crypto 相关
+    '币': 'B',
+    '比': 'B',
+    '乙': 'Y',
+    '太': 'T',
+    '梭': 'S',
+    '瑞': 'R',
+    '波': 'B',
+    '卡': 'K',
+    '狗': 'G',
+    '柴': 'C',
+    '特': 'T',
+  };
+
+  let result = '';
+  for (const char of text) {
+    if (pinyinMap[char]) {
+      result += pinyinMap[char];
+    } else if (/[\u4e00-\u9fa5]/.test(char)) {
+      // 其他中文字符取拼音首字母 (简化处理：取 Unicode 码高位作为区分)
+      result += char.charAt(0);
+    } else {
+      result += char;
+    }
+  }
+  return result.toUpperCase();
+}
+
+/**
+ * 搜索匹配：支持英文、中文、拼音首字母
+ */
+function matchesSearchQuery(option: MarketSelectOption, query: string): boolean {
+  if (!query.trim()) {
+    return true;
+  }
+
+  const upperQuery = query.toUpperCase().trim();
+  const label = option.label || '';
+  const value = option.value || '';
+  const baseAsset = option.baseAsset || '';
+  const quoteAsset = option.quoteAsset || '';
+
+  // 完全匹配
+  if (value.toUpperCase().includes(upperQuery)) {
+    return true;
+  }
+
+  // label 匹配 (如 "BTC/USDT")
+  if (label.toUpperCase().includes(upperQuery)) {
+    return true;
+  }
+
+  // 资产匹配
+  if (baseAsset.toUpperCase().includes(upperQuery) || quoteAsset.toUpperCase().includes(upperQuery)) {
+    return true;
+  }
+
+  // 拼音首字母匹配 (如 "bte" -> "BTC/ETH")
+  const labelInitials = getPinyinInitials(label) + label.replace(/[^A-Z]/g, '');
+  if (labelInitials.toUpperCase().includes(upperQuery)) {
+    return true;
+  }
+
+  // 价值首字母匹配 (BTCUSDT -> BTC)
+  const valueInitials = value.split(/(?=[A-Z])/).slice(0, 2).join('');
+  if (valueInitials.includes(upperQuery)) {
+    return true;
+  }
+
+  return false;
+}
+
 export const MarketSelect: React.FC<MarketSelectProps> = ({
   label,
   value,
@@ -47,10 +129,14 @@ export const MarketSelect: React.FC<MarketSelectProps> = ({
   disabled = false,
   initialOpen = false,
   testId,
+  searchable = false,
+  placeholder = '搜索...',
 }) => {
   const labelId = useId();
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [isOpen, setIsOpen] = useState(initialOpen);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const selectedIndex = useMemo(() => {
     const resolvedIndex = options.findIndex((option) => option.value === value && !option.disabled);
@@ -61,9 +147,22 @@ export const MarketSelect: React.FC<MarketSelectProps> = ({
 
   const selectedOption = selectedIndex >= 0 ? options[selectedIndex] : options[0];
 
+  const filteredOptions = useMemo(() => {
+    if (!searchable || !searchQuery.trim()) {
+      return options;
+    }
+    return options.filter((option) => matchesSearchQuery(option, searchQuery));
+  }, [options, searchable, searchQuery]);
+
   useEffect(() => {
     setHighlightedIndex(selectedIndex >= 0 ? selectedIndex : 0);
   }, [selectedIndex]);
+
+  useEffect(() => {
+    if (isOpen && searchable && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [isOpen, searchable]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -92,13 +191,14 @@ export const MarketSelect: React.FC<MarketSelectProps> = ({
   }, [isOpen]);
 
   const commitSelection = (index: number) => {
-    const option = options[index];
+    const option = filteredOptions[index];
 
     if (!option || option.disabled) {
       return;
     }
 
     onChange(option.value);
+    setSearchQuery('');
     setHighlightedIndex(index);
     setIsOpen(false);
   };
@@ -115,7 +215,7 @@ export const MarketSelect: React.FC<MarketSelectProps> = ({
         getNextEnabledOptionIndex({
           currentIndex: current < 0 ? selectedIndex : current,
           direction: 1,
-          options,
+          options: filteredOptions,
         }));
     }
 
@@ -126,7 +226,7 @@ export const MarketSelect: React.FC<MarketSelectProps> = ({
         getNextEnabledOptionIndex({
           currentIndex: current < 0 ? selectedIndex : current,
           direction: -1,
-          options,
+          options: filteredOptions,
         }));
     }
 
@@ -148,7 +248,7 @@ export const MarketSelect: React.FC<MarketSelectProps> = ({
         getNextEnabledOptionIndex({
           currentIndex: current,
           direction: 1,
-          options,
+          options: filteredOptions,
         }));
     }
 
@@ -158,13 +258,18 @@ export const MarketSelect: React.FC<MarketSelectProps> = ({
         getNextEnabledOptionIndex({
           currentIndex: current,
           direction: -1,
-          options,
+          options: filteredOptions,
         }));
     }
 
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       commitSelection(highlightedIndex);
+    }
+
+    if (event.key === 'Escape') {
+      setSearchQuery('');
+      setIsOpen(false);
     }
   };
 
@@ -201,36 +306,70 @@ export const MarketSelect: React.FC<MarketSelectProps> = ({
 
       {isOpen ? (
         <div
-          className="market-select__panel"
+          className={`market-select__panel${searchable ? ' market-select__panel--with-search' : ''}`}
           role="listbox"
           aria-labelledby={labelId}
           tabIndex={-1}
           onKeyDown={handleListKeyDown}
         >
-          {options.map((option, index) => {
-            const isSelected = option.value === selectedOption?.value;
-            const isHighlighted = index === highlightedIndex;
+          {searchable && (
+            <div className="market-select__search">
+              <input
+                ref={searchInputRef}
+                type="text"
+                className="market-select__search-input"
+                placeholder={placeholder}
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setHighlightedIndex(0);
+                }}
+                onClick={(e) => e.stopPropagation()}
+                aria-label="搜索交易对"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  className="market-select__search-clear"
+                  onClick={() => {
+                    setSearchQuery('');
+                    searchInputRef.current?.focus();
+                  }}
+                  aria-label="清除搜索"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          )}
+          {filteredOptions.length === 0 ? (
+            <div className="market-select__empty">暂无匹配结果</div>
+          ) : (
+            filteredOptions.map((option, index) => {
+              const isSelected = option.value === selectedOption?.value;
+              const isHighlighted = index === highlightedIndex;
 
-            return (
-              <button
-                key={option.value || `${label}-${index}`}
-                type="button"
-                role="option"
-                aria-selected={isSelected}
-                className={[
-                  'market-select__option',
-                  isSelected ? 'market-select__option--selected' : '',
-                  isHighlighted ? 'market-select__option--highlighted' : '',
-                ].filter(Boolean).join(' ')}
-                disabled={option.disabled}
-                onMouseEnter={() => setHighlightedIndex(index)}
-                onClick={() => commitSelection(index)}
-              >
-                {option.icon ? <span className="market-select__icon">{option.icon}</span> : null}
-                <span className="market-select__text">{option.label}</span>
-              </button>
-            );
-          })}
+              return (
+                <button
+                  key={option.value || `${label}-${index}`}
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
+                  className={[
+                    'market-select__option',
+                    isSelected ? 'market-select__option--selected' : '',
+                    isHighlighted ? 'market-select__option--highlighted' : '',
+                  ].filter(Boolean).join(' ')}
+                  disabled={option.disabled}
+                  onMouseEnter={() => setHighlightedIndex(index)}
+                  onClick={() => commitSelection(index)}
+                >
+                  {option.icon ? <span className="market-select__icon">{option.icon}</span> : null}
+                  <span className="market-select__text">{option.label}</span>
+                </button>
+              );
+            })
+          )}
         </div>
       ) : null}
     </div>

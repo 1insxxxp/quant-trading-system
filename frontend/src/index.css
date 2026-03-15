@@ -1156,6 +1156,93 @@ input[type='checkbox'] {
     0 8px 24px rgba(60, 100, 160, 0.1),
     inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
+
+/* Panel with Search */
+.market-select__panel--with-search {
+  padding-top: 4px;
+}
+
+/* Search Input */
+.market-select__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(167, 191, 223, 0.1);
+}
+
+:root[data-theme='light'] .market-select__search {
+  border-bottom-color: rgba(88, 114, 150, 0.15);
+}
+
+.market-select__search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid rgba(167, 191, 223, 0.2);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-main);
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.market-select__search-input::placeholder {
+  color: var(--text-soft);
+}
+
+.market-select__search-input:focus {
+  border-color: rgba(67, 127, 194, 0.4);
+  box-shadow: 0 0 0 2px rgba(67, 127, 194, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+:root[data-theme='light'] .market-select__search-input {
+  background: rgba(246, 249, 253, 0.8);
+  border-color: rgba(88, 114, 150, 0.2);
+}
+
+:root[data-theme='light'] .market-select__search-input:focus {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(37, 134, 255, 0.3);
+  box-shadow: 0 0 0 2px rgba(37, 134, 255, 0.12);
+}
+
+.market-select__search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-subtle);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.market-select__search-clear:hover {
+  background: rgba(167, 191, 223, 0.15);
+  color: var(--text-main);
+}
+
+:root[data-theme='light'] .market-select__search-clear:hover {
+  background: rgba(88, 114, 150, 0.15);
+}
+
+/* Empty State */
+.market-select__empty {
+  padding: 20px 12px;
+  text-align: center;
+  color: var(--text-subtle);
+  font-size: 0.85rem;
+}
+
 /* ================================
    Market Select Options
    ================================ */
