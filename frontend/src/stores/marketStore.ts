@@ -822,7 +822,6 @@ function normalizeSymbols(
   return symbols
     .filter((item) => !item.exchange || item.exchange === exchange)
     .filter((item) => item.type === undefined || item.type === 'spot')
-    .filter((item) => ['BTC', 'ETH'].includes(item.base_asset ?? ''))
     .map((item) => ({
       value: item.symbol,
       label: item.base_asset && item.quote_asset
