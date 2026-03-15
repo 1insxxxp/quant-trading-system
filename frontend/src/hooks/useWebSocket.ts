@@ -1,12 +1,14 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { createSingleFlightRunner } from '../lib/singleFlight';
 import { createMarketSocketClient, type MarketSocketMessage } from '../lib/marketSocket';
+import { createLatencyMonitor, type LatencyMonitor } from '../lib/webSocketLatency';
 import { getMarketKey, useMarketStore } from '../stores/marketStore';
 import type { Kline, PriceUpdate } from '../types/index';
 
 const FALLBACK_POLL_INTERVAL_MS = 1200;
 const PRICE_FALLBACK_INTERVAL = '1m';
 const PRICE_STALE_THRESHOLD_MS = 5_000;
+const RECONNECT_COUNT_TOAST_THRESHOLD = 3;
 
 export const useWebSocket = () => {
   const exchange = useMarketStore((state) => state.exchange);
@@ -19,7 +21,16 @@ export const useWebSocket = () => {
   const setLatestPrice = useMarketStore((state) => state.setLatestPrice);
   const setIsConnected = useMarketStore((state) => state.setIsConnected);
   const setRealtimeUpdateState = useMarketStore((state) => state.setRealtimeUpdateState);
+  const setWsLatency = useMarketStore((state) => state.setWsLatency);
+  const setWsReconnectCount = useMarketStore((state) => state.setWsReconnectCount);
+  const addToast = useMarketStore((state) => state.addToast);
   const loadInitialKlines = useMarketStore((state) => state.loadInitialKlines);
+  const latencyMonitorRef = useRef<LatencyMonitor | null>(null);
+  const reconnectCountRef = useRef(0);
+
+  if (!latencyMonitorRef.current) {
+    latencyMonitorRef.current = createLatencyMonitor();
+  }
   const hasStalePrice = (
     typeof lastPriceTimestamp !== 'number' ||
     Date.now() - lastPriceTimestamp > PRICE_STALE_THRESHOLD_MS
@@ -41,13 +52,32 @@ export const useWebSocket = () => {
       onConnected: () => {
         setIsConnected(true);
         setRealtimeUpdateState('connected');
+        reconnectCountRef.current = 0;
+        setWsReconnectCount(0);
       },
       onDisconnected: () => {
         setIsConnected(false);
         setRealtimeUpdateState('disconnected');
+        latencyMonitorRef.current?.reset();
+        setWsLatency(0);
       },
       onError: () => {
+        reconnectCountRef.current += 1;
+        setWsReconnectCount(reconnectCountRef.current);
         setRealtimeUpdateState('reconnecting');
+
+        // 在多次重连时显示 toast 通知
+        if (reconnectCountRef.current >= RECONNECT_COUNT_TOAST_THRESHOLD) {
+          addToast({
+            type: 'warning',
+            message: `WebSocket 连接不稳定，已尝试重连 ${reconnectCountRef.current} 次...`,
+            duration: 4000,
+          });
+        }
+      },
+      onLatency: (latency: number) => {
+        latencyMonitorRef.current?.recordLatency(latency);
+        setWsLatency(latency);
       },
       onMessage: (message: MarketSocketMessage) => {
         const activeState = useMarketStore.getState();
@@ -105,6 +135,7 @@ export const useWebSocket = () => {
 
     return () => {
       client.disconnect();
+      latencyMonitorRef.current?.reset();
     };
   }, [exchange, symbol, interval]);
 

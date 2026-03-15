@@ -69,6 +69,12 @@ export interface MarketState {
   // 细化的加载状态
   klineLoadState: KlineLoadState;
   realtimeUpdateState: 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+  // WebSocket 延迟监测
+  wsLatency: number | null;
+  wsLatencyStatus: 'excellent' | 'good' | 'fair' | 'poor' | 'unknown';
+  wsReconnectCount: number;
+  // Toast 通知
+  toasts: ToastMessage[];
 
   setExchange: (exchange: string) => void;
   setSymbol: (symbol: string) => void;
@@ -80,6 +86,10 @@ export interface MarketState {
   setIsConnected: (connected: boolean) => void;
   setKlineLoadState: (state: KlineLoadState) => void;
   setRealtimeUpdateState: (state: 'disconnected' | 'connecting' | 'connected' | 'reconnecting') => void;
+  setWsLatency: (latency: number) => void;
+  setWsReconnectCount: (count: number) => void;
+  addToast: (toast: Omit<ToastMessage, 'id'>) => void;
+  dismissToast: (id: string) => void;
   loadInitialKlines: () => Promise<void>;
   loadOlderKlines: () => Promise<void>;
   retryLoadOlderKlines: () => Promise<void>;
@@ -87,4 +97,11 @@ export interface MarketState {
   fetchIndicatorSettings: () => Promise<void>;
   updateIndicatorSetting: (indicatorId: IndicatorId, enabled: boolean) => Promise<void>;
   fetchFundingRate: () => Promise<void>;
+}
+
+export interface ToastMessage {
+  id: string;
+  type: 'info' | 'success' | 'warning' | 'error';
+  message: string;
+  duration?: number;
 }

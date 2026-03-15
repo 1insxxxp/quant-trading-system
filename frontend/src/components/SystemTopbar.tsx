@@ -5,6 +5,8 @@ import { useUiStore } from '../stores/uiStore';
 import { ExchangeIcon, AssetIcon } from './marketIcons';
 import { MarketSelect, type MarketSelectOption } from './MarketSelect';
 import { RollingDigits } from './RollingDigits';
+import { ConnectionStatus } from './ConnectionStatus';
+import { ToastContainer } from './Toast';
 const EXCHANGES = [
   { value: 'binance', label: 'Binance' },
   { value: 'okx', label: 'OKX' },
@@ -41,6 +43,11 @@ export const SystemTopbar: React.FC = () => {
   const isSidebarCollapsed = useUiStore((state) => state.isSidebarCollapsed);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
   const realtimeUpdateState = useMarketStore((state) => state.realtimeUpdateState);
+  const wsLatency = useMarketStore((state) => state.wsLatency);
+  const wsLatencyStatus = useMarketStore((state) => state.wsLatencyStatus);
+  const wsReconnectCount = useMarketStore((state) => state.wsReconnectCount);
+  const toasts = useMarketStore((state) => state.toasts);
+  const dismissToast = useMarketStore((state) => state.dismissToast);
   const exchange = useMarketStore((state) => state.exchange);
   const symbol = useMarketStore((state) => state.symbol);
   const symbols = useMarketStore((state) => state.symbols);
@@ -74,21 +81,6 @@ export const SystemTopbar: React.FC = () => {
   const marketLabel = `${formatMarketSymbol(symbol)} · ${exchange.toUpperCase()}`;
   const latestPriceLabel = latestPrice !== null ? formatLivePrice(latestPrice) : '等待价格';
 
-  const getStatusConfig = () => {
-    switch (realtimeUpdateState) {
-      case 'connected':
-        return { class: 'live', label: '连接在线' };
-      case 'reconnecting':
-        return { class: 'reconnecting', label: '正在重连' };
-      case 'connecting':
-        return { class: 'waiting', label: '正在连接' };
-      case 'disconnected':
-      default:
-        return { class: 'waiting', label: '连接断开' };
-    }
-  };
-
-  const statusConfig = getStatusConfig();
   const priceTone = resolvePriceTone({
     latestPrice,
     latestKlineOpen: latestKline?.open ?? null,
@@ -154,12 +146,14 @@ export const SystemTopbar: React.FC = () => {
         </div>
       </div>
 
-      <div className="system-topbar__status" role="status" aria-live="polite" aria-label={statusConfig.label}>
-        <span
-          className={`signal-light signal-light--${statusConfig.class}`}
-          aria-hidden="true"
-        />
-      </div>
+      <ConnectionStatus
+        state={realtimeUpdateState}
+        latency={wsLatency}
+        latencyStatus={wsLatencyStatus}
+        reconnectCount={wsReconnectCount}
+      />
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </header>
   );
 };

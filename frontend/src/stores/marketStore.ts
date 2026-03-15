@@ -9,6 +9,7 @@ import type {
   KlineSource,
   MarketState,
   SymbolOption,
+  ToastMessage,
 } from '../types/index.js';
 
 let latestFetchToken = 0;
@@ -110,6 +111,10 @@ export const useMarketStore = create<MarketState>((set, get) => ({
   isLoadingFundingRate: false,
   klineLoadState: 'idle',
   realtimeUpdateState: 'disconnected',
+  wsLatency: null,
+  wsLatencyStatus: 'unknown' as const,
+  wsReconnectCount: 0,
+  toasts: [],
 
   setExchange: (exchange: string) => {
     set((state) => {
@@ -368,6 +373,47 @@ export const useMarketStore = create<MarketState>((set, get) => ({
 
   setRealtimeUpdateState: (state: 'disconnected' | 'connecting' | 'connected' | 'reconnecting') => {
     set({ realtimeUpdateState: state });
+  },
+
+  setWsLatency: (latency: number) => {
+    set((state) => {
+      const monitor = {
+        latency,
+        avgLatency: state.wsLatency,
+        status: state.wsLatencyStatus,
+      };
+
+      // 简单计算延迟状态
+      let newStatus: typeof state.wsLatencyStatus = 'unknown';
+      if (latency > 0) {
+        if (latency < 50) newStatus = 'excellent';
+        else if (latency < 150) newStatus = 'good';
+        else if (latency < 300) newStatus = 'fair';
+        else newStatus = 'poor';
+      }
+
+      return {
+        wsLatency: latency,
+        wsLatencyStatus: newStatus,
+      };
+    });
+  },
+
+  setWsReconnectCount: (count: number) => {
+    set({ wsReconnectCount: count });
+  },
+
+  addToast: (toast: Omit<ToastMessage, 'id'>) => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    set((state) => ({
+      toasts: [...state.toasts, { ...toast, id }],
+    }));
+  },
+
+  dismissToast: (id: string) => {
+    set((state) => ({
+      toasts: state.toasts.filter((t) => t.id !== id),
+    }));
   },
 
   fetchFundingRate: async () => {

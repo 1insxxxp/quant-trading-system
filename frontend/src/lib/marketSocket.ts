@@ -38,6 +38,7 @@ interface MarketSocketClientOptions {
   onError: (error: unknown) => void;
   heartbeatIntervalMs?: number;
   heartbeatTimeoutMs?: number;
+  onLatency?: (latency: number) => void;
 }
 
 interface MarketSocketClient {
@@ -60,12 +61,14 @@ export function createMarketSocketClient({
   onError,
   heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS,
   heartbeatTimeoutMs = DEFAULT_HEARTBEAT_TIMEOUT_MS,
+  onLatency,
 }: MarketSocketClientOptions): MarketSocketClient {
   let socket: SocketLike | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   let heartbeatTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   let disposed = false;
+  let lastPingTime = 0;
 
   const clearReconnectTimer = () => {
     if (reconnectTimer !== null) {
@@ -96,6 +99,7 @@ export function createMarketSocketClient({
       }
 
       try {
+        lastPingTime = Date.now();
         socket.send(JSON.stringify({ type: 'ping' }));
 
         heartbeatTimeoutTimer = setTimeoutFn(() => {
@@ -145,10 +149,18 @@ export function createMarketSocketClient({
         const data = JSON.parse(event.data) as MarketSocketMessage;
 
         if (data.type === 'pong') {
+          const latency = Date.now() - lastPingTime;
+
           if (heartbeatTimeoutTimer !== null) {
             clearTimeoutFn(heartbeatTimeoutTimer);
             heartbeatTimeoutTimer = null;
           }
+
+          // 报告延迟
+          if (typeof onLatency === 'function' && latency > 0) {
+            onLatency(latency);
+          }
+
           scheduleHeartbeat();
           return;
         }

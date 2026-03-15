@@ -4390,3 +4390,218 @@ body::after {
   border-color: var(--panel-border-strong);
   box-shadow: 0 0 0 3px var(--brand-soft);
 }
+
+/* ============================================
+   Connection Status Component
+   ============================================ */
+
+.connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(8, 20, 36, 0.8);
+  border: 1px solid rgba(126, 190, 255, 0.12);
+  font-size: 0.78rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.connection-status__indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  transition: background-color 200ms ease, box-shadow 200ms ease;
+}
+
+.connection-status__indicator--excellent {
+  background: #0ea765;
+  box-shadow: 0 0 8px rgba(14, 167, 101, 0.5);
+}
+
+.connection-status__indicator--good {
+  background: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+}
+
+.connection-status__indicator--fair {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+}
+
+.connection-status__indicator--poor {
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+}
+
+.connection-status__indicator--waiting,
+.connection-status__indicator--disconnected {
+  background: #6b7280;
+  box-shadow: 0 0 6px rgba(107, 114, 128, 0.3);
+}
+
+.connection-status__indicator--reconnecting {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+  animation: pulse-reconnect 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-reconnect {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.1);
+  }
+}
+
+.connection-status__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-subtle);
+}
+
+.connection-status__latency {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.connection-status__reconnect {
+  color: var(--warning);
+  font-size: 0.7rem;
+  animation: blink-reconnect 1s ease-in-out infinite;
+}
+
+@keyframes blink-reconnect {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+:root[data-theme='light'] .connection-status {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(112, 166, 224, 0.14);
+}
+
+:root[data-theme='light'] .connection-status__label {
+  color: #58718c;
+}
+
+:root[data-theme='light'] .connection-status__latency {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* ============================================
+   Toast Notifications
+   ============================================ */
+
+.toast-container {
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 280px;
+  max-width: 420px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: rgba(8, 20, 36, 0.96);
+  border: 1px solid rgba(126, 190, 255, 0.14);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+  animation: slide-in-right 200ms ease-out;
+  backdrop-filter: blur(8px);
+}
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.toast--info {
+  border-left: 4px solid #43d4ff;
+}
+
+.toast--success {
+  border-left: 4px solid #38e09b;
+}
+
+.toast--warning {
+  border-left: 4px solid #f4ba58;
+}
+
+.toast--error {
+  border-left: 4px solid #ff6b7c;
+}
+
+.toast__icon {
+  flex-shrink: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.toast--info .toast__icon { color: #43d4ff; }
+.toast--success .toast__icon { color: #38e09b; }
+.toast--warning .toast__icon { color: #f4ba58; }
+.toast--error .toast__icon { color: #ff6b7c; }
+
+.toast__message {
+  flex: 1;
+  color: var(--text-main);
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.toast__dismiss {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-subtle);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.toast__dismiss:hover,
+.toast__dismiss:focus-visible {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+}
+
+:root[data-theme='light'] .toast {
+  background: rgba(255, 255, 255, 0.98);
+  border-color: rgba(112, 166, 224, 0.18);
+  box-shadow: 0 8px 24px rgba(108, 145, 193, 0.15);
+}
+
+:root[data-theme='light'] .toast__dismiss:hover,
+:root[data-theme='light'] .toast__dismiss:focus-visible {
+  background: rgba(0, 0, 0, 0.06);
+}

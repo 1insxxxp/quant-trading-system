@@ -6,6 +6,10 @@ import type { SymbolOption } from '../types';
 const mockMarketState = {
   isConnected: true,
   realtimeUpdateState: 'connected' as const,
+  wsLatency: null,
+  wsLatencyStatus: 'unknown' as const,
+  wsReconnectCount: 0,
+  toasts: [],
   exchange: 'binance',
   symbol: 'ETHUSDT',
   symbols: [
@@ -80,11 +84,10 @@ describe('SystemTopbar', () => {
     expect(markup).toContain('ETH/USDT');
     expect(markup).toContain('BINANCE');
     expect(markup).toContain('\u6536\u8d77\u4fa7\u8fb9\u680f');
-    expect(markup).toContain('aria-label="\u8fde\u63a5\u5728\u7ebf"');
-    expect(markup).toContain('signal-light');
+    expect(markup).toContain('connection-status');
+    expect(markup).toContain('已连接');
     expect(markup).toContain('system-topbar__price-section');
     expect(markup).toContain('system-topbar__controls');
-    expect(markup).toContain('system-topbar__status');
     expect(markup).toContain('rolling-digits');
     expect(markup).toContain('data-testid="topbar-exchange-select-trigger"');
     expect(markup).toContain('data-testid="topbar-symbol-select-trigger"');
