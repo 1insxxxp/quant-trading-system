@@ -94,7 +94,8 @@ export function buildCandlestickData(klines: Kline[]): CandlestickData[] {
       });
       prevClose = kline.close;
     } else if (prevClose !== null) {
-      // 使用前置收盘价填充缺失的 K 线
+      // 使用前置收盘价填充缺失的 K 线（Do 线）
+      // 注意：填充的 K 线不会影响价格刻度，因为它的价格与前一根 K 线相同
       result.push({
         time: (targetTime / 1000) as CandlestickData['time'],
         open: prevClose,

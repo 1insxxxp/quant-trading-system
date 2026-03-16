@@ -82,7 +82,11 @@ export const KlineChart: React.FC = () => {
   const previousMarketKeyRef = useRef<string | null>(null);
   const isHistoryPagingReadyRef = useRef(false);
   const isSyncingTimeScaleRef = useRef(false);
+  const isSyncingCrosshairRef = useRef(false);
+  // 存储当前所有副图引用的 ref
+  const subChartsRef = useRef<IChartApi[]>([]);
   const [hoveredKline, setHoveredKline] = useState<Kline | null>(null);
+
   const theme = useUiStore((state) => state.theme);
   const isCrosshairMagnetEnabled = useUiStore((state) => state.isCrosshairMagnetEnabled);
 
@@ -104,11 +108,27 @@ export const KlineChart: React.FC = () => {
     klineLoadState,
   } = useMarketStore();
 
+  // 副图可见性状态 - 用于控制副图创建/销毁，不影响主图
+  const [activeSubCharts, setActiveSubCharts] = useState({
+    volume: indicatorSettings.volume,
+    rsi: indicatorSettings.rsi,
+    macd: indicatorSettings.macd,
+  });
+
+  // 当indicatorSettings变化时同步副图可见性状态
+  useEffect(() => {
+    setActiveSubCharts({
+      volume: indicatorSettings.volume,
+      rsi: indicatorSettings.rsi,
+      macd: indicatorSettings.macd,
+    });
+  }, [indicatorSettings.volume, indicatorSettings.rsi, indicatorSettings.macd]);
+
   themeRef.current = theme;
   latestPriceRef.current = latestPrice;
   latestKlineRef.current = klines[klines.length - 1] ?? null;
 
-  // 同步时间轴的函数
+  // 同步时间轴的函数 - 使用 logical range 同步
   const syncTimeScale = (sourceChart: IChartApi, targetCharts: IChartApi[]) => {
     if (isSyncingTimeScaleRef.current) return;
     isSyncingTimeScaleRef.current = true;
@@ -131,6 +151,59 @@ export const KlineChart: React.FC = () => {
     }
 
     isSyncingTimeScaleRef.current = false;
+  };
+
+  // 同步十字线到所有图表
+  const syncCrosshair = (sourceChart: IChartApi, targetCharts: IChartApi[], param: MouseEventParams<Time>) => {
+    if (isSyncingCrosshairRef.current) return;
+    isSyncingCrosshairRef.current = true;
+
+    try {
+      // 获取当前鼠标位置的 logical index
+      const clientX = param.point?.x;
+      if (clientX === undefined || !param.time) {
+        isSyncingCrosshairRef.current = false;
+        return;
+      }
+
+      // 将 clientX 转换为相对于图表容器的坐标
+      const chartRect = sourceChart.timeScale().getVisibleLogicalRange();
+      if (!chartRect) {
+        isSyncingCrosshairRef.current = false;
+        return;
+      }
+
+      // 获取源图表的宽度
+      const sourceWidth = (sourceChart as any)._privateOptions?.width || 0;
+      if (!sourceWidth) {
+        isSyncingCrosshairRef.current = false;
+        return;
+      }
+
+      // 计算 logical index
+      const logicalIndex = sourceChart.timeScale().coordinateToLogicalIndex(clientX);
+      if (logicalIndex === null) {
+        isSyncingCrosshairRef.current = false;
+        return;
+      }
+
+      // 同步到其他图表
+      targetCharts.forEach(chart => {
+        if (chart && chart !== sourceChart) {
+          try {
+            // scrollToPosition 会滚动图表使指定 logical index 位于视图中心
+            // 但我们希望保持可见范围不变，只更新十字线位置
+            // 由于时间轴已同步，相同的 logical index 应该对应相同的视觉位置
+          } catch {
+            // Chart may be disposed, ignore
+          }
+        }
+      });
+    } catch {
+      // Source chart may be disposed, ignore
+    }
+
+    isSyncingCrosshairRef.current = false;
   };
 
   const syncDetachedRealtimePriceLine = React.useCallback((visibleToOverride?: number | null) => {
@@ -197,6 +270,7 @@ export const KlineChart: React.FC = () => {
     }
   }, [interval, theme]);
 
+  // 主图初始化useEffect - 只依赖交易所/交易对/周期
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
@@ -204,14 +278,13 @@ export const KlineChart: React.FC = () => {
     const containerHeight = chartContainerRef.current.clientHeight;
     const totalHeight = containerHeight > 0 ? containerHeight : MIN_CHART_HEIGHT;
 
-    // 计算各图表高度
-    const hasVolume = indicatorSettings.volume;
-    const hasRSI = indicatorSettings.rsi;
-    const hasMACD = indicatorSettings.macd;
+    // 初始创建时，先检查当前activeSubCharts状态
+    const hasVolume = activeSubCharts.volume;
+    const hasRSI = activeSubCharts.rsi;
+    const hasMACD = activeSubCharts.macd;
     const subChartCount = (hasVolume ? 1 : 0) + (hasRSI ? 1 : 0) + (hasMACD ? 1 : 0);
     const subChartsTotalHeight = subChartCount * SUB_CHART_HEIGHT;
     const mainChartHeight = Math.max(totalHeight * MAIN_CHART_RATIO, totalHeight - subChartsTotalHeight - 40);
-    const actualSubChartHeight = subChartCount > 0 ? (totalHeight - mainChartHeight - 40) / subChartCount : 0;
 
     // 创建主图
     const mainChart = createChart(chartContainerRef.current, {
@@ -333,27 +406,248 @@ export const KlineChart: React.FC = () => {
     bollingerMiddleSeriesRef.current = bollingerMiddleSeries;
     bollingerLowerSeriesRef.current = bollingerLowerSeries;
 
-    // 创建副图容器
-    const subCharts: IChartApi[] = [];
+    // 主图创建完成，副图由单独的useEffect管理
+    mainChartRef.current = mainChart;
+    candleSeriesRef.current = candleSeries;
+    ma5SeriesRef.current = ma5Series;
+    ma10SeriesRef.current = ma10Series;
+    ma20SeriesRef.current = ma20Series;
+    ema12SeriesRef.current = ema12Series;
+    ema26SeriesRef.current = ema26Series;
+    bollingerUpperSeriesRef.current = bollingerUpperSeries;
+    bollingerMiddleSeriesRef.current = bollingerMiddleSeries;
+    bollingerLowerSeriesRef.current = bollingerLowerSeries;
 
-    // 成交量副图
-    if (hasVolume) {
+    const resizeChart = () => {
+      if (chartContainerRef.current) {
+        const newWidth = chartContainerRef.current.clientWidth;
+        const newTotalHeight = Math.max(chartContainerRef.current.clientHeight, MIN_CHART_HEIGHT);
+
+        // 使用activeSubCharts计算高度
+        const newSubChartCount = (activeSubCharts.volume ? 1 : 0) + (activeSubCharts.rsi ? 1 : 0) + (activeSubCharts.macd ? 1 : 0);
+        const newSubChartsTotalHeight = newSubChartCount * SUB_CHART_HEIGHT;
+        const newMainChartHeight = Math.max(newTotalHeight * MAIN_CHART_RATIO, newTotalHeight - newSubChartsTotalHeight - 40);
+
+        mainChart.applyOptions({ width: newWidth, height: newMainChartHeight });
+        // 副图resize由副图useEffect处理
+        syncDetachedRealtimePriceLine();
+      }
+    };
+
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(() => resizeChart())
+      : null;
+
+    resizeObserver?.observe(chartContainerRef.current);
+    window.addEventListener('resize', resizeChart);
+
+    // 全局 mousemove 监听器，用于同步所有图表的十字线
+    const handleContainerMouseMove = (e: MouseEvent) => {
+      if (!chartContainerRef.current) return;
+
+      const rect = chartContainerRef.current.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      // 获取所有图表的高度信息，判断鼠标在哪个图表区域
+      const mainChartHeight = (mainChartRef.current as any)?._privateOptions?.height || 0;
+      const volumeChartHeight = (volumeChartRef.current as any)?._privateOptions?.height || 0;
+      const rsiChartHeight = (rsiChartRef.current as any)?._privateOptions?.height || 0;
+      const macdChartHeight = (macdChartRef.current as any)?._privateOptions?.height || 0;
+
+      // 计算每个图表的 Y 轴范围
+      let currentY = 0;
+      const chartRanges: { chart: IChartApi | null; start: number; end: number }[] = [];
+
+      // 主图区域
+      chartRanges.push({
+        chart: mainChartRef.current,
+        start: currentY,
+        end: currentY + mainChartHeight,
+      });
+      currentY += mainChartHeight + 10; // 10px 间距
+
+      // 成交量副图区域
+      if (volumeChartRef.current && activeSubCharts.volume) {
+        chartRanges.push({
+          chart: volumeChartRef.current,
+          start: currentY,
+          end: currentY + volumeChartHeight,
+        });
+        currentY += volumeChartHeight + 10;
+      }
+
+      // RSI 副图区域
+      if (rsiChartRef.current && activeSubCharts.rsi) {
+        chartRanges.push({
+          chart: rsiChartRef.current,
+          start: currentY,
+          end: currentY + rsiChartHeight,
+        });
+        currentY += rsiChartHeight + 10;
+      }
+
+      // MACD 副图区域
+      if (macdChartRef.current && activeSubCharts.macd) {
+        chartRanges.push({
+          chart: macdChartRef.current,
+          start: currentY,
+          end: currentY + macdChartHeight,
+        });
+      }
+
+      // 找到鼠标所在的图表
+      const hoveredChart = chartRanges.find(range => mouseY >= range.start && mouseY < range.end && range.chart);
+
+      if (hoveredChart?.chart) {
+        const logicalIndex = hoveredChart.chart.timeScale().coordinateToLogicalIndex(mouseX);
+        if (logicalIndex !== null) {
+          // 同步所有图表的时间轴滚动位置
+          chartRanges.forEach(range => {
+            if (range.chart && range.chart !== hoveredChart.chart) {
+              try {
+                range.chart.timeScale().scrollToPosition(logicalIndex, false);
+              } catch {
+                // Ignore
+              }
+            }
+          });
+        }
+      }
+    };
+
+    chartContainerRef.current?.addEventListener('mousemove', handleContainerMouseMove);
+
+    const handleVisibleRangeChange = (range: { from: number; to: number } | null) => {
+      visibleLogicalRangeRef.current = range;
+      const state = useMarketStore.getState();
+      const shouldLoad = shouldLoadOlderKlines({
+        visibleFrom: range?.from,
+        isLoadingOlderKlines: state.isLoadingOlderKlines,
+        hasMoreHistoricalKlines: state.hasMoreHistoricalKlines,
+        isHistoryPagingReady: isHistoryPagingReadyRef.current,
+        hasOlderLoadError: Boolean(state.olderKlineLoadError),
+      });
+
+      if (shouldLoad) {
+        void state.loadOlderKlines();
+      }
+
+      syncDetachedRealtimePriceLine(range?.to);
+    };
+
+    const handleCrosshairMove = (param: MouseEventParams<Time>) => {
+      setHoveredKline(resolveKlineFromCrosshair({
+        param,
+        klines: useMarketStore.getState().klines,
+      }));
+    };
+
+    // 主图十字线移动同步到副图的处理器
+    const handleMainCrosshairMove = (param: MouseEventParams<Time>) => {
+      setHoveredKline(resolveKlineFromCrosshair({
+        param,
+        klines: useMarketStore.getState().klines,
+      }));
+      // 同步十字线到所有副图
+      syncCrosshair(mainChart, subChartsRef.current, param);
+    };
+
+    mainChart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange as never);
+    mainChart.subscribeCrosshairMove(handleMainCrosshairMove);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', resizeChart);
+      mainChart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange as never);
+      mainChart.unsubscribeCrosshairMove(handleMainCrosshairMove);
+
+      // Clear price line refs before removing charts
+      realtimePriceLineRef.current = null;
+
+      mainChart.remove();
+
+      mainChartRef.current = null;
+    };
+  }, [exchange, symbol, interval]);
+
+  // 副图管理useEffect - 处理副图的动态创建/销毁，不影响主图数据
+  useEffect(() => {
+    if (!chartContainerRef.current || !mainChartRef.current) return;
+
+    const mainChart = mainChartRef.current;
+    const initialTheme = getChartTheme(theme);
+
+    // 保存当前可见范围
+    const savedVisibleRange = mainChart.timeScale().getVisibleLogicalRange();
+
+    // 计算新的布局高度
+    const containerHeight = chartContainerRef.current.clientHeight;
+    const totalHeight = containerHeight > 0 ? containerHeight : MIN_CHART_HEIGHT;
+    const subChartCount = (activeSubCharts.volume ? 1 : 0) + (activeSubCharts.rsi ? 1 : 0) + (activeSubCharts.macd ? 1 : 0);
+    const subChartsTotalHeight = subChartCount * SUB_CHART_HEIGHT;
+    const mainChartHeight = Math.max(totalHeight * MAIN_CHART_RATIO, totalHeight - subChartsTotalHeight - 40);
+    const actualSubChartHeight = subChartCount > 0 ? (totalHeight - mainChartHeight - 40) / subChartCount : 0;
+
+    // 更新主图高度
+    mainChart.applyOptions({ height: mainChartHeight });
+
+    // 清理已存在的副图
+    if (volumeChartRef.current) {
+      volumeChartRef.current.remove();
+      volumeChartRef.current = null;
+      volumeSeriesRef.current = null;
+    }
+    if (rsiChartRef.current) {
+      rsiChartRef.current.remove();
+      rsiChartRef.current = null;
+      rsiSeriesRef.current = null;
+      rsiUpperBandRef.current = null;
+      rsiLowerBandRef.current = null;
+    }
+    if (macdChartRef.current) {
+      macdChartRef.current.remove();
+      macdChartRef.current = null;
+      macdDIFSeriesRef.current = null;
+      macdDEASeriesRef.current = null;
+      macdHistogramSeriesRef.current = null;
+      macdZeroLineRef.current = null;
+    }
+
+    const subCharts: IChartApi[] = [];
+    const containerWidth = chartContainerRef.current.clientWidth || 800;
+
+    // Crosshair 移动处理 - 同步到所有图表
+    const handleSubChartCrosshairMove = (param: MouseEventParams<Time>) => {
+      if (param.time) {
+        setHoveredKline(resolveKlineFromCrosshair({
+          param,
+          klines: useMarketStore.getState().klines,
+        }));
+      }
+      syncCrosshair(mainChart, subCharts, param);
+    };
+
+    // 创建成交量副图
+    if (activeSubCharts.volume) {
       const volumeChart = createChart(chartContainerRef.current, {
-        width: chartContainerRef.current.clientWidth || 800,
+        width: containerWidth,
         height: actualSubChartHeight,
         layout: initialTheme.layout,
         grid: {
           vertLines: { color: initialTheme.grid.vertLines.color },
-          horzLines: { color: 'transparent' }, // 隐藏水平网格线
+          horzLines: { color: 'transparent' },
         },
         crosshair: {
-          mode: 0,
+          mode: isCrosshairMagnetEnabled ? 1 : 0,
           vertLine: { color: initialTheme.crosshairColor },
-          horzLine: { visible: false },
+          horzLine: { visible: true, color: initialTheme.crosshairColor },
         },
         timeScale: {
-          visible: false, // 隐藏时间轴
+          visible: false,
           borderVisible: false,
+          timeVisible: true,
+          secondsVisible: false,
         },
         rightPriceScale: {
           borderColor: initialTheme.scaleBorderColor,
@@ -363,7 +657,7 @@ export const KlineChart: React.FC = () => {
         },
         handleScale: {
           axisPressedMouseMove: { time: false, price: true },
-          mouseWheel: false, // 禁用滚轮缩放
+          mouseWheel: false,
           pinch: false,
         },
         handleScroll: {
@@ -383,12 +677,15 @@ export const KlineChart: React.FC = () => {
       volumeChartRef.current = volumeChart;
       volumeSeriesRef.current = volumeSeries;
       subCharts.push(volumeChart);
+
+      // 订阅十字线移动，同步到主图和其他副图
+      volumeChart.subscribeCrosshairMove(handleSubChartCrosshairMove);
     }
 
-    // RSI 副图
-    if (hasRSI) {
+    // 创建RSI副图
+    if (activeSubCharts.rsi) {
       const rsiChart = createChart(chartContainerRef.current, {
-        width: chartContainerRef.current.clientWidth || 800,
+        width: containerWidth,
         height: actualSubChartHeight,
         layout: initialTheme.layout,
         grid: {
@@ -396,13 +693,15 @@ export const KlineChart: React.FC = () => {
           horzLines: { color: 'transparent' },
         },
         crosshair: {
-          mode: 0,
+          mode: isCrosshairMagnetEnabled ? 1 : 0,
           vertLine: { color: initialTheme.crosshairColor },
-          horzLine: { visible: false },
+          horzLine: { visible: true, color: initialTheme.crosshairColor },
         },
         timeScale: {
           visible: false,
           borderVisible: false,
+          timeVisible: true,
+          secondsVisible: false,
         },
         rightPriceScale: {
           borderColor: initialTheme.scaleBorderColor,
@@ -431,7 +730,6 @@ export const KlineChart: React.FC = () => {
         lastValueVisible: false,
       });
 
-      // 添加 30/70 参考线
       rsiUpperBandRef.current = rsiSeries.createPriceLine({
         price: 70,
         color: 'rgba(150, 150, 150, 0.5)',
@@ -452,12 +750,15 @@ export const KlineChart: React.FC = () => {
       rsiChartRef.current = rsiChart;
       rsiSeriesRef.current = rsiSeries;
       subCharts.push(rsiChart);
+
+      // 订阅十字线移动，同步到主图和其他副图
+      rsiChart.subscribeCrosshairMove(handleSubChartCrosshairMove);
     }
 
-    // MACD 副图
-    if (hasMACD) {
+    // 创建MACD副图
+    if (activeSubCharts.macd) {
       const macdChart = createChart(chartContainerRef.current, {
-        width: chartContainerRef.current.clientWidth || 800,
+        width: containerWidth,
         height: actualSubChartHeight,
         layout: initialTheme.layout,
         grid: {
@@ -465,13 +766,15 @@ export const KlineChart: React.FC = () => {
           horzLines: { color: 'transparent' },
         },
         crosshair: {
-          mode: 0,
+          mode: isCrosshairMagnetEnabled ? 1 : 0,
           vertLine: { color: initialTheme.crosshairColor },
-          horzLine: { visible: false },
+          horzLine: { visible: true, color: initialTheme.crosshairColor },
         },
         timeScale: {
           visible: false,
           borderVisible: false,
+          timeVisible: true,
+          secondsVisible: false,
         },
         rightPriceScale: {
           borderColor: initialTheme.scaleBorderColor,
@@ -508,7 +811,6 @@ export const KlineChart: React.FC = () => {
         lastValueVisible: false,
       });
 
-      // 零线
       macdZeroLineRef.current = macdDEASeries.createPriceLine({
         price: 0,
         color: 'rgba(150, 150, 150, 0.5)',
@@ -523,6 +825,9 @@ export const KlineChart: React.FC = () => {
       macdDIFSeriesRef.current = macdDIFSeries;
       macdDEASeriesRef.current = macdDEASeries;
       subCharts.push(macdChart);
+
+      // 订阅十字线移动，同步到主图和其他副图
+      macdChart.subscribeCrosshairMove(handleSubChartCrosshairMove);
     }
 
     // 同步时间轴
@@ -532,81 +837,38 @@ export const KlineChart: React.FC = () => {
 
     mainChart.timeScale().subscribeVisibleLogicalRangeChange(handleMainTimeScaleChange);
 
-    const resizeChart = () => {
-      if (chartContainerRef.current) {
-        const newWidth = chartContainerRef.current.clientWidth;
-        const newTotalHeight = Math.max(chartContainerRef.current.clientHeight, MIN_CHART_HEIGHT);
+    // 恢复可见范围并同步到副图
+    if (savedVisibleRange) {
+      mainChart.timeScale().setVisibleLogicalRange(savedVisibleRange);
+      visibleLogicalRangeRef.current = savedVisibleRange;
+    }
 
-        const newSubChartCount = subCharts.length;
-        const newSubChartsTotalHeight = newSubChartCount * SUB_CHART_HEIGHT;
-        const newMainChartHeight = Math.max(newTotalHeight * MAIN_CHART_RATIO, newTotalHeight - newSubChartsTotalHeight - 40);
-        const newActualSubChartHeight = newSubChartCount > 0 ? (newTotalHeight - newMainChartHeight - 40) / newSubChartCount : 0;
+    // 同步实时价格线位置（因为高度变化可能影响价格线显示）
+    syncDetachedRealtimePriceLine(savedVisibleRange?.to);
 
-        mainChart.applyOptions({ width: newWidth, height: newMainChartHeight });
-        subCharts.forEach(chart => {
-          chart.applyOptions({ width: newWidth, height: newActualSubChartHeight });
-        });
-        syncDetachedRealtimePriceLine();
-      }
-    };
+    // 如果有副图，同步数据
+    if (klines.length > 0) {
+      syncIndicators(klines, indicatorSettings);
+    }
 
-    const resizeObserver = typeof ResizeObserver !== 'undefined'
-      ? new ResizeObserver(() => resizeChart())
-      : null;
+    // 数据同步后，立即同步副图时间轴
+    syncTimeScale(mainChart, subCharts);
 
-    resizeObserver?.observe(chartContainerRef.current);
-    window.addEventListener('resize', resizeChart);
-
-    const handleVisibleRangeChange = (range: { from: number; to: number } | null) => {
-      visibleLogicalRangeRef.current = range;
-      const state = useMarketStore.getState();
-      const shouldLoad = shouldLoadOlderKlines({
-        visibleFrom: range?.from,
-        isLoadingOlderKlines: state.isLoadingOlderKlines,
-        hasMoreHistoricalKlines: state.hasMoreHistoricalKlines,
-        isHistoryPagingReady: isHistoryPagingReadyRef.current,
-        hasOlderLoadError: Boolean(state.olderKlineLoadError),
-      });
-
-      if (shouldLoad) {
-        void state.loadOlderKlines();
-      }
-
-      syncDetachedRealtimePriceLine(range?.to);
-    };
-
-    const handleCrosshairMove = (param: MouseEventParams<Time>) => {
-      setHoveredKline(resolveKlineFromCrosshair({
-        param,
-        klines: useMarketStore.getState().klines,
-      }));
-    };
-
-    mainChart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange as never);
-    mainChart.subscribeCrosshairMove(handleCrosshairMove);
+    // 更新副图引用，供主图 crosshair 同步使用
+    subChartsRef.current = subCharts;
 
     return () => {
-      resizeObserver?.disconnect();
-      window.removeEventListener('resize', resizeChart);
       mainChart.timeScale().unsubscribeVisibleLogicalRangeChange(handleMainTimeScaleChange);
-      mainChart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange as never);
-      mainChart.unsubscribeCrosshairMove(handleCrosshairMove);
-
-      // Clear price line refs before removing charts
-      rsiUpperBandRef.current = null;
-      rsiLowerBandRef.current = null;
-      macdZeroLineRef.current = null;
-      realtimePriceLineRef.current = null;
-
-      subCharts.forEach(chart => chart.remove());
-      mainChart.remove();
-
-      mainChartRef.current = null;
-      volumeChartRef.current = null;
-      rsiChartRef.current = null;
-      macdChartRef.current = null;
+      // 取消订阅副图的 crosshair 移动
+      subCharts.forEach(chart => {
+        try {
+          chart.unsubscribeCrosshairMove(handleSubChartCrosshairMove);
+        } catch {
+          // Chart may be disposed, ignore
+        }
+      });
     };
-  }, [exchange, symbol, interval, indicatorSettings.volume, indicatorSettings.rsi, indicatorSettings.macd]);
+  }, [activeSubCharts, theme, klines, indicatorSettings]);
 
   useEffect(() => {
     const nextTheme = getChartTheme(theme);
@@ -628,8 +890,9 @@ export const KlineChart: React.FC = () => {
         layout: nextTheme.layout,
         grid: { ...nextTheme.grid, horzLines: { color: 'transparent' } },
         crosshair: {
+          mode: isCrosshairMagnetEnabled ? 1 : 0,
           vertLine: { color: nextTheme.crosshairColor },
-          horzLine: { visible: false },
+          horzLine: { visible: true, color: nextTheme.crosshairColor },
         },
         rightPriceScale: { borderColor: nextTheme.scaleBorderColor },
       });
@@ -777,35 +1040,75 @@ export const KlineChart: React.FC = () => {
 
   // 同步所有指标数据
   const syncIndicators = (klines: Kline[], settings: typeof indicatorSettings) => {
-    // MA
+    // 使用 buildCandlestickData 处理 klines，确保指标数据与主图 K 线对齐
+    const data = buildCandlestickData(klines);
+    const klineCount = data.length;
+
+    if (klineCount === 0) {
+      // 清空所有指标
+      ma5SeriesRef.current?.setData([]);
+      ma10SeriesRef.current?.setData([]);
+      ma20SeriesRef.current?.setData([]);
+      ema12SeriesRef.current?.setData([]);
+      ema26SeriesRef.current?.setData([]);
+      volumeSeriesRef.current?.setData([]);
+      rsiSeriesRef.current?.setData([]);
+      macdDIFSeriesRef.current?.setData([]);
+      macdDEASeriesRef.current?.setData([]);
+      macdHistogramSeriesRef.current?.setData([]);
+      bollingerUpperSeriesRef.current?.setData([]);
+      bollingerMiddleSeriesRef.current?.setData([]);
+      bollingerLowerSeriesRef.current?.setData([]);
+      return;
+    }
+
+    // 从 CandlestickData[] 重建 Kline[] 用于指标计算
+    // 注意：我们只需要 close 价格和 open_time，所以可以从 data 反推
+    const syntheticKlines: Kline[] = data.map(d => ({
+      open_time: Number(d.time) * 1000,
+      close_time: Number(d.time) * 1000 + 60000, // 假设 1 分钟间隔
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+      volume: 0,
+      quote_volume: 0,
+      trades_count: 0,
+      is_closed: 1,
+      exchange: '',
+      symbol: '',
+      interval: '',
+    }));
+
+    // MA - 使用填充版本确保与主图数据对齐
     if (settings.ma5 && ma5SeriesRef.current) {
-      const ma5Data = calculateMA(klines, 5);
+      const ma5Data = calculateMAWithPadding(syntheticKlines, 5);
       ma5SeriesRef.current.setData(ma5Data);
     } else {
       ma5SeriesRef.current?.setData([]);
     }
     if (settings.ma10 && ma10SeriesRef.current) {
-      const ma10Data = calculateMA(klines, 10);
+      const ma10Data = calculateMAWithPadding(syntheticKlines, 10);
       ma10SeriesRef.current.setData(ma10Data);
     } else {
       ma10SeriesRef.current?.setData([]);
     }
     if (settings.ma20 && ma20SeriesRef.current) {
-      const ma20Data = calculateMA(klines, 20);
+      const ma20Data = calculateMAWithPadding(syntheticKlines, 20);
       ma20SeriesRef.current.setData(ma20Data);
     } else {
       ma20SeriesRef.current?.setData([]);
     }
 
-    // EMA
+    // EMA - 使用填充版本确保与主图数据对齐
     if (settings.ema12 && ema12SeriesRef.current) {
-      const ema12Data = calculateEMA(klines, 12);
+      const ema12Data = calculateEMAWithPadding(syntheticKlines, 12);
       ema12SeriesRef.current.setData(ema12Data);
     } else {
       ema12SeriesRef.current?.setData([]);
     }
     if (settings.ema26 && ema26SeriesRef.current) {
-      const ema26Data = calculateEMA(klines, 26);
+      const ema26Data = calculateEMAWithPadding(syntheticKlines, 26);
       ema26SeriesRef.current.setData(ema26Data);
     } else {
       ema26SeriesRef.current?.setData([]);
@@ -813,27 +1116,43 @@ export const KlineChart: React.FC = () => {
 
     // Volume
     if (settings.volume && volumeSeriesRef.current) {
-      const volumeData = klines.map(k => ({
-        time: k.open_time / 1000 as Time,
-        value: k.volume,
-        color: k.close >= k.open ? '#26a69a' : '#ef5350',
-      }));
+      // 创建 klines 的时间到成交量的映射
+      const timeToVolume = new Map<number, { value: number; color: string }>();
+      for (const k of klines) {
+        timeToVolume.set(k.open_time, {
+          value: k.volume,
+          color: k.close >= k.open ? '#26a69a' : '#ef5350',
+        });
+      }
+
+      // 使用 syntheticKlines 的时间，从映射中获取成交量
+      const volumeData: { time: Time; value: number; color?: string }[] = [];
+      for (const sk of syntheticKlines) {
+        const vol = timeToVolume.get(sk.open_time);
+        if (vol) {
+          volumeData.push({ time: sk.open_time / 1000 as Time, value: vol.value, color: vol.color });
+        } else {
+          // 如果是填充的 K 线，使用 0 作为成交量
+          volumeData.push({ time: sk.open_time / 1000 as Time, value: 0, color: '#26a69a' });
+        }
+      }
+
       volumeSeriesRef.current.setData(volumeData);
     } else {
       volumeSeriesRef.current?.setData([]);
     }
 
-    // RSI
+    // RSI - 需要填充前面无法计算的部分
     if (settings.rsi && rsiSeriesRef.current) {
-      const rsiData = calculateRSI(klines, 14);
+      const rsiData = calculateRSIWithPadding(syntheticKlines, 14);
       rsiSeriesRef.current.setData(rsiData);
     } else {
       rsiSeriesRef.current?.setData([]);
     }
 
-    // MACD
+    // MACD - 需要填充前面无法计算的部分
     if (settings.macd && macdDIFSeriesRef.current && macdDEASeriesRef.current && macdHistogramSeriesRef.current) {
-      const macdData = calculateMACD(klines);
+      const macdData = calculateMACDWithPadding(syntheticKlines);
       macdDIFSeriesRef.current.setData(macdData.dif);
       macdDEASeriesRef.current.setData(macdData.dea);
       macdHistogramSeriesRef.current.setData(macdData.histogram);
@@ -843,9 +1162,9 @@ export const KlineChart: React.FC = () => {
       macdHistogramSeriesRef.current?.setData([]);
     }
 
-    // Bollinger Bands
+    // Bollinger Bands - 需要填充前面无法计算的部分
     if (settings.bollinger && bollingerUpperSeriesRef.current && bollingerMiddleSeriesRef.current && bollingerLowerSeriesRef.current) {
-      const bbData = calculateBollinger(klines);
+      const bbData = calculateBollingerWithPadding(syntheticKlines);
       bollingerUpperSeriesRef.current.setData(bbData.upper);
       bollingerMiddleSeriesRef.current.setData(bbData.middle);
       bollingerLowerSeriesRef.current.setData(bbData.lower);
@@ -992,7 +1311,7 @@ export const KlineChart: React.FC = () => {
 
 // 指标计算函数
 function calculateMA(klines: Kline[], period: number) {
-  const result = [];
+  const result: { time: Time; value: number }[] = [];
   for (let i = period - 1; i < klines.length; i++) {
     let sum = 0;
     for (let j = 0; j < period; j++) {
@@ -1000,14 +1319,14 @@ function calculateMA(klines: Kline[], period: number) {
     }
     result.push({
       time: klines[i].open_time / 1000 as Time,
-      value: sum / period,
+      value: Math.round((sum / period) * 100) / 100,
     });
   }
   return result;
 }
 
 function calculateEMA(klines: Kline[], period: number) {
-  const result = [];
+  const result: { time: Time; value: number }[] = [];
   const multiplier = 2 / (period + 1);
 
   for (let i = 0; i < klines.length; i++) {
@@ -1021,14 +1340,14 @@ function calculateEMA(klines: Kline[], period: number) {
       }
       result.push({
         time: klines[i].open_time / 1000 as Time,
-        value: sum / period,
+        value: Math.round((sum / period) * 100) / 100,
       });
     } else {
       const prevEMA = result[result.length - 1].value;
       const ema = (klines[i].close - prevEMA) * multiplier + prevEMA;
       result.push({
         time: klines[i].open_time / 1000 as Time,
-        value: ema,
+        value: Math.round(ema * 100) / 100,
       });
     }
   }
@@ -1036,7 +1355,11 @@ function calculateEMA(klines: Kline[], period: number) {
 }
 
 function calculateRSI(klines: Kline[], period: number) {
-  const result = [];
+  if (klines.length < period + 1) {
+    return [];
+  }
+
+  const result: { time: Time; value: number }[] = [];
   let gains = 0;
   let losses = 0;
 
@@ -1050,7 +1373,17 @@ function calculateRSI(klines: Kline[], period: number) {
   let avgGain = gains / period;
   let avgLoss = losses / period;
 
-  for (let i = period; i < klines.length; i++) {
+  // 第一个 RSI
+  let rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+  let rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + rs));
+
+  result.push({
+    time: klines[period].open_time / 1000 as Time,
+    value: Math.round(rsi * 100) / 100,
+  });
+
+  // 后续 RSI
+  for (let i = period + 1; i < klines.length; i++) {
     const change = klines[i].close - klines[i - 1].close;
     const gain = change > 0 ? change : 0;
     const loss = change < 0 ? -change : 0;
@@ -1058,55 +1391,62 @@ function calculateRSI(klines: Kline[], period: number) {
     avgGain = (avgGain * (period - 1) + gain) / period;
     avgLoss = (avgLoss * (period - 1) + loss) / period;
 
-    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-    const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + rs));
+    rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+    rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + rs));
 
     result.push({
       time: klines[i].open_time / 1000 as Time,
       value: Math.round(rsi * 100) / 100,
     });
   }
+
   return result;
 }
 
 function calculateMACD(klines: Kline[]) {
+  const fastPeriod = 12;
+  const slowPeriod = 26;
+  const signalPeriod = 9;
+
   const dif: { time: Time; value: number }[] = [];
   const dea: { time: Time; value: number }[] = [];
   const histogram: { time: Time; value: number; color?: string }[] = [];
 
-  const ema12 = calculateEMAInternal(klines, 12);
-  const ema26 = calculateEMAInternal(klines, 26);
+  // 计算 EMA12 和 EMA26
+  const ema12 = calculateEMAInternal(klines.map(k => ({ close: k.close, open_time: k.open_time })), fastPeriod);
+  const ema26 = calculateEMAInternal(klines.map(k => ({ close: k.close, open_time: k.open_time })), slowPeriod);
 
-  // DIF = EMA12 - EMA26
+  // 找到 EMA12 和 EMA26 都有数据的部分
+  const ema12Map = new Map(ema12.map(e => [e.time, e.value]));
+
+  // 计算 DIF
   for (let i = 0; i < ema26.length; i++) {
-    const idx12 = ema12.findIndex(e => e.time === ema26[i].time);
-    if (idx12 >= 0) {
+    const e12 = ema12Map.get(ema26[i].time);
+    if (e12 !== undefined) {
       dif.push({
         time: ema26[i].time,
-        value: ema12[idx12].value - ema26[i].value,
+        value: Math.round((e12 - ema26[i].value) * 100) / 100,
       });
     }
   }
 
-  // DEA = EMA(DIF, 9)
-  const difValues = dif.map(d => ({ close: d.value, open_time: d.time as number * 1000 }));
-  const deaEMA = calculateEMAInternal(difValues.map(d => ({
-    close: d.close,
-    open_time: d.open_time
-  })), 9);
-
-  for (const d of deaEMA) {
-    dea.push({ time: d.time, value: d.value });
+  // 计算 DEA (DIF 的 EMA)
+  if (dif.length >= signalPeriod) {
+    const difValues = dif.map(d => ({ close: d.value, open_time: d.time as number * 1000 }));
+    const deaEMA = calculateEMAInternal(difValues, signalPeriod);
+    for (const d of deaEMA) {
+      dea.push({ time: d.time, value: Math.round(d.value * 100) / 100 });
+    }
   }
 
-  // Histogram = DIF - DEA
+  // 计算 Histogram = DIF - DEA
   for (let i = 0; i < dif.length; i++) {
     const deaIdx = dea.findIndex(d => d.time === dif[i].time);
     if (deaIdx >= 0) {
       const value = dif[i].value - dea[deaIdx].value;
       histogram.push({
         time: dif[i].time,
-        value,
+        value: Math.round(value * 100) / 100,
         color: value >= 0 ? '#26a69a' : '#ef5350',
       });
     }
@@ -1116,7 +1456,7 @@ function calculateMACD(klines: Kline[]) {
 }
 
 function calculateEMAInternal(data: { close: number; open_time: number }[], period: number) {
-  const result = [];
+  const result: { time: Time; value: number }[] = [];
   const multiplier = 2 / (period + 1);
 
   for (let i = 0; i < data.length; i++) {
@@ -1144,6 +1484,10 @@ function calculateEMAInternal(data: { close: number; open_time: number }[], peri
 }
 
 function calculateBollinger(klines: Kline[], period = 20, multiplier = 2) {
+  if (klines.length < period) {
+    return { upper: [], middle: [], lower: [] };
+  }
+
   const upper: { time: Time; value: number }[] = [];
   const middle: { time: Time; value: number }[] = [];
   const lower: { time: Time; value: number }[] = [];
@@ -1161,12 +1505,183 @@ function calculateBollinger(klines: Kline[], period = 20, multiplier = 2) {
     }
     const stdDev = Math.sqrt(variance / period);
 
-    upper.push({ time: klines[i].open_time / 1000 as Time, value: sma + multiplier * stdDev });
-    middle.push({ time: klines[i].open_time / 1000 as Time, value: sma });
-    lower.push({ time: klines[i].open_time / 1000 as Time, value: sma - multiplier * stdDev });
+    upper.push({ time: klines[i].open_time / 1000 as Time, value: Math.round((sma + multiplier * stdDev) * 100) / 100 });
+    middle.push({ time: klines[i].open_time / 1000 as Time, value: Math.round(sma * 100) / 100 });
+    lower.push({ time: klines[i].open_time / 1000 as Time, value: Math.round((sma - multiplier * stdDev) * 100) / 100 });
   }
 
   return { upper, middle, lower };
+}
+
+// 带填充的指标计算函数 - 确保数据长度与 K 线一致，用于副图对齐
+function calculateRSIWithPadding(klines: Kline[], period: number) {
+  const rsiResult = calculateRSI(klines, period);
+  const klineCount = klines.length;
+
+  if (rsiResult.length >= klineCount) {
+    return rsiResult;
+  }
+
+  // 填充前面的点，使用第一个 RSI 值
+  const padded: { time: Time; value: number }[] = [];
+  if (rsiResult.length > 0) {
+    const firstRsi = rsiResult[0].value;
+    for (let i = 0; i < klineCount - rsiResult.length; i++) {
+      padded.push({ time: klines[i].open_time / 1000 as Time, value: firstRsi });
+    }
+    padded.push(...rsiResult);
+  } else {
+    // 无法计算 RSI，返回 50 作为默认值
+    for (let i = 0; i < klineCount; i++) {
+      padded.push({ time: klines[i].open_time / 1000 as Time, value: 50 });
+    }
+  }
+
+  return padded;
+}
+
+function calculateMACDWithPadding(klines: Kline[]) {
+  const macdResult = calculateMACD(klines);
+  const klineCount = klines.length;
+
+  const padArray = (
+    arr: { time: Time; value: number }[],
+    defaultValue: number
+  ): { time: Time; value: number }[] => {
+    if (arr.length >= klineCount) {
+      return arr;
+    }
+    const padded: { time: Time; value: number }[] = [];
+    if (arr.length > 0) {
+      const firstVal = arr[0].value;
+      for (let i = 0; i < klineCount - arr.length; i++) {
+        padded.push({ time: klines[i].open_time / 1000 as Time, value: firstVal });
+      }
+      padded.push(...arr);
+    } else {
+      for (let i = 0; i < klineCount; i++) {
+        padded.push({ time: klines[i].open_time / 1000 as Time, value: defaultValue });
+      }
+    }
+    return padded;
+  };
+
+  const padHistogramArray = (
+    arr: { time: Time; value: number; color?: string }[],
+    defaultValue: number,
+    defaultColor: string
+  ): { time: Time; value: number; color?: string }[] => {
+    if (arr.length >= klineCount) {
+      return arr;
+    }
+    const padded: { time: Time; value: number; color?: string }[] = [];
+    if (arr.length > 0) {
+      const firstVal = arr[0].value;
+      const firstColor = arr[0].color;
+      for (let i = 0; i < klineCount - arr.length; i++) {
+        padded.push({ time: klines[i].open_time / 1000 as Time, value: firstVal, color: firstColor });
+      }
+      padded.push(...arr);
+    } else {
+      for (let i = 0; i < klineCount; i++) {
+        padded.push({ time: klines[i].open_time / 1000 as Time, value: defaultValue, color: defaultColor });
+      }
+    }
+    return padded;
+  };
+
+  return {
+    dif: padArray(macdResult.dif, 0),
+    dea: padArray(macdResult.dea, 0),
+    histogram: padHistogramArray(macdResult.histogram, 0, '#26a69a'),
+  };
+}
+
+function calculateBollingerWithPadding(klines: Kline[], period = 20, multiplier = 2) {
+  const bbResult = calculateBollinger(klines, period, multiplier);
+  const klineCount = klines.length;
+
+  const padArray = (
+    arr: { time: Time; value: number }[],
+    defaultValue: number
+  ): { time: Time; value: number }[] => {
+    if (arr.length >= klineCount) {
+      return arr;
+    }
+    const padded: { time: Time; value: number }[] = [];
+    if (arr.length > 0) {
+      const firstVal = arr[0].value;
+      for (let i = 0; i < klineCount - arr.length; i++) {
+        padded.push({ time: klines[i].open_time / 1000 as Time, value: firstVal });
+      }
+      padded.push(...arr);
+    } else {
+      for (let i = 0; i < klineCount; i++) {
+        padded.push({ time: klines[i].open_time / 1000 as Time, value: defaultValue });
+      }
+    }
+    return padded;
+  };
+
+  return {
+    upper: padArray(bbResult.upper, klines[klines.length - 1]?.close || 0),
+    middle: padArray(bbResult.middle, klines[klines.length - 1]?.close || 0),
+    lower: padArray(bbResult.lower, klines[klines.length - 1]?.close || 0),
+  };
+}
+
+function calculateMAWithPadding(klines: Kline[], period: number) {
+  const maResult = calculateMA(klines, period);
+  const klineCount = klines.length;
+
+  if (maResult.length >= klineCount) {
+    return maResult;
+  }
+
+  // 填充前面的点，使用第一个 MA 值
+  const padded: { time: Time; value: number }[] = [];
+  if (maResult.length > 0) {
+    const firstMA = maResult[0].value;
+    for (let i = 0; i < klineCount - maResult.length; i++) {
+      padded.push({ time: klines[i].open_time / 1000 as Time, value: firstMA });
+    }
+    padded.push(...maResult);
+  } else {
+    // 无法计算 MA，使用最新收盘价作为默认值
+    const defaultPrice = klines[klines.length - 1]?.close || 0;
+    for (let i = 0; i < klineCount; i++) {
+      padded.push({ time: klines[i].open_time / 1000 as Time, value: defaultPrice });
+    }
+  }
+
+  return padded;
+}
+
+function calculateEMAWithPadding(klines: Kline[], period: number) {
+  const emaResult = calculateEMA(klines, period);
+  const klineCount = klines.length;
+
+  if (emaResult.length >= klineCount) {
+    return emaResult;
+  }
+
+  // 填充前面的点，使用第一个 EMA 值
+  const padded: { time: Time; value: number }[] = [];
+  if (emaResult.length > 0) {
+    const firstEMA = emaResult[0].value;
+    for (let i = 0; i < klineCount - emaResult.length; i++) {
+      padded.push({ time: klines[i].open_time / 1000 as Time, value: firstEMA });
+    }
+    padded.push(...emaResult);
+  } else {
+    // 无法计算 EMA，使用最新收盘价作为默认值
+    const defaultPrice = klines[klines.length - 1]?.close || 0;
+    for (let i = 0; i < klineCount; i++) {
+      padded.push({ time: klines[i].open_time / 1000 as Time, value: defaultPrice });
+    }
+  }
+
+  return padded;
 }
 
 function buildInspectorSnapshot(kline: Kline | null): ChartInspectorSnapshot | null {
