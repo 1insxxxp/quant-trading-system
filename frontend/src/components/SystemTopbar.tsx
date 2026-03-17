@@ -7,6 +7,7 @@ import { MarketSelect, type MarketSelectOption } from './MarketSelect';
 import { RollingDigits } from './RollingDigits';
 import { ConnectionStatus } from './ConnectionStatus';
 import { ToastContainer } from './Toast';
+import { UserMenu } from './UserMenu';
 const EXCHANGES = [
   { value: 'binance', label: 'Binance' },
   { value: 'okx', label: 'OKX' },
@@ -148,12 +149,16 @@ export const SystemTopbar: React.FC = () => {
         </div>
       </div>
 
-      <ConnectionStatus
-        state={realtimeUpdateState}
-        latency={wsLatency}
-        latencyStatus={wsLatencyStatus}
-        reconnectCount={wsReconnectCount}
-      />
+      <div className="system-topbar__right-section">
+        <ConnectionStatus
+          state={realtimeUpdateState}
+          latency={wsLatency}
+          latencyStatus={wsLatencyStatus}
+          reconnectCount={wsReconnectCount}
+        />
+
+        <UserMenu />
+      </div>
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </header>

@@ -506,8 +506,7 @@ input[type='checkbox'] {
 
 .system-topbar {
   /* Layout & Structure */
-  display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  display: flex;
   align-items: center;
   gap: 16px;
   padding: 0 12px;
@@ -633,8 +632,6 @@ input[type='checkbox'] {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex: 1;
-  min-width: 0;
 }
 
 .system-topbar__control-group {
@@ -658,6 +655,13 @@ input[type='checkbox'] {
 /* ================================
    Status Section - Right Side
    ================================ */
+
+.system-topbar__right-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
 
 .system-topbar__status {
   display: flex;
@@ -4626,6 +4630,155 @@ body::after {
 
 :root[data-theme='light'] .connection-status__latency {
   background: rgba(0, 0, 0, 0.06);
+}
+
+/* ============================================
+   User Menu
+   ============================================ */
+
+.user-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.user-menu-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: linear-gradient(180deg, rgba(12, 28, 49, 0.82), rgba(8, 17, 31, 0.72));
+  border: 1px solid rgba(126, 190, 255, 0.14);
+  border-radius: 10px;
+  color: var(--text-main);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  box-shadow: inset 0 1px 0 rgba(204, 233, 255, 0.05);
+}
+
+.user-menu-button:hover {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px rgba(67, 212, 255, 0.15), inset 0 1px 0 rgba(204, 233, 255, 0.05);
+}
+
+.user-menu-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--brand) 0%, rgba(139, 92, 246, 0.9) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #040c19;
+  flex-shrink: 0;
+}
+
+.user-menu-chevron {
+  transition: transform 0.2s ease;
+  color: var(--text-subtle);
+}
+
+.user-menu-chevron--open {
+  transform: rotate(180deg);
+}
+
+.user-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+}
+
+.user-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: linear-gradient(180deg, rgba(12, 24, 43, 0.95), rgba(7, 16, 30, 0.88));
+  backdrop-filter: blur(20px);
+  border-radius: 12px;
+  border: 1px solid rgba(110, 166, 255, 0.15);
+  box-shadow: 0 24px 60px rgba(2, 8, 19, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  min-width: 200px;
+  z-index: 9999;
+  overflow: hidden;
+  animation: dropdown-fade-in 0.2s ease-out;
+}
+
+@keyframes dropdown-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.user-menu-dropdown-header {
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(110, 166, 255, 0.15);
+  background: rgba(8, 19, 36, 0.5);
+}
+
+.user-menu-dropdown-header-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-subtle);
+  margin-bottom: 4px;
+}
+
+.user-menu-dropdown-header-username {
+  color: var(--text-main);
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.user-menu-dropdown-header-email {
+  font-size: 11px;
+  color: var(--text-subtle);
+  margin-top: 2px;
+}
+
+.user-menu-dropdown-item {
+  width: 100%;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text-main);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: background 0.2s ease;
+}
+
+.user-menu-dropdown-item:hover {
+  background: rgba(67, 212, 255, 0.08);
+}
+
+.user-menu-dropdown-item--danger {
+  color: var(--danger);
+}
+
+.user-menu-dropdown-item--danger:hover {
+  background: rgba(255, 107, 124, 0.1);
+}
+
+:root[data-theme='light'] .user-menu-button {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(242, 248, 255, 0.84));
+  border-color: rgba(112, 166, 224, 0.14);
+}
+
+:root[data-theme='light'] .user-menu-dropdown {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 251, 255, 0.9));
+  border-color: rgba(95, 156, 228, 0.18);
 }
 
 /* ============================================
