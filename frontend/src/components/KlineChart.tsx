@@ -181,7 +181,7 @@ export const KlineChart: React.FC = () => {
       }
 
       // 计算 logical index
-      const logicalIndex = sourceChart.timeScale().coordinateToLogicalIndex(clientX);
+      const logicalIndex = sourceChart.timeScale().coordinateToLogical(clientX);
       if (logicalIndex === null) {
         isSyncingCrosshairRef.current = false;
         return;
@@ -309,12 +309,10 @@ export const KlineChart: React.FC = () => {
         secondsVisible: false,
         fixLeftEdge: false,
         fixRightEdge: false,
-        lockVisibleTimeRange: false,
       },
       rightPriceScale: {
         borderColor: initialTheme.scaleBorderColor,
         autoScale: true,
-        autoScaleMargin: 8,
         scaleMargins: { top: 0.05, bottom: 0.05 },
         visible: true,
       },
@@ -325,9 +323,8 @@ export const KlineChart: React.FC = () => {
         pinch: true,
       },
       handleScroll: {
-        axisPressedMouseMove: { time: true, price: true },
-        mouseWheel: true,
         pressedMouseMove: true,
+        mouseWheel: true,
         horzTouchDrag: true,
         vertTouchDrag: true,
       },
@@ -500,7 +497,7 @@ export const KlineChart: React.FC = () => {
       const hoveredChart = chartRanges.find(range => mouseY >= range.start && mouseY < range.end && range.chart);
 
       if (hoveredChart?.chart) {
-        const logicalIndex = hoveredChart.chart.timeScale().coordinateToLogicalIndex(mouseX);
+        const logicalIndex = hoveredChart.chart.timeScale().coordinateToLogical(mouseX);
         if (logicalIndex !== null) {
           // 同步所有图表的时间轴滚动位置
           chartRanges.forEach(range => {
@@ -534,13 +531,6 @@ export const KlineChart: React.FC = () => {
       }
 
       syncDetachedRealtimePriceLine(range?.to);
-    };
-
-    const handleCrosshairMove = (param: MouseEventParams<Time>) => {
-      setHoveredKline(resolveKlineFromCrosshair({
-        param,
-        klines: useMarketStore.getState().klines,
-      }));
     };
 
     // 主图十字线移动同步到副图的处理器
@@ -661,9 +651,8 @@ export const KlineChart: React.FC = () => {
           pinch: false,
         },
         handleScroll: {
-          axisPressedMouseMove: { time: false, price: false },
-          mouseWheel: false,
           pressedMouseMove: false,
+          mouseWheel: false,
         },
       });
 
@@ -706,8 +695,6 @@ export const KlineChart: React.FC = () => {
         rightPriceScale: {
           borderColor: initialTheme.scaleBorderColor,
           autoScale: false,
-          minValue: 0,
-          maxValue: 100,
           scaleMargins: { top: 0.05, bottom: 0.05 },
           visible: true,
         },
@@ -717,15 +704,14 @@ export const KlineChart: React.FC = () => {
           pinch: false,
         },
         handleScroll: {
-          axisPressedMouseMove: { time: false, price: false },
-          mouseWheel: false,
           pressedMouseMove: false,
+          mouseWheel: false,
         },
       });
 
       const rsiSeries = rsiChart.addLineSeries({
         color: initialTheme.rsiColor,
-        lineWidth: 1.5,
+        lineWidth: 2,
         priceLineVisible: false,
         lastValueVisible: false,
       });
@@ -788,9 +774,8 @@ export const KlineChart: React.FC = () => {
           pinch: false,
         },
         handleScroll: {
-          axisPressedMouseMove: { time: false, price: false },
-          mouseWheel: false,
           pressedMouseMove: false,
+          mouseWheel: false,
         },
       });
 

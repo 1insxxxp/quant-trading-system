@@ -1,18 +1,14 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
-import { logout } from '../lib/auth';
 
 export const UserMenu: React.FC = () => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const { user, token, logout: authLogout } = useAuthStore();
+  const { user, logout } = useAuthStore();
   const navigate = useNavigate();
 
-  const handleLogout = async () => {
-    if (token) {
-      await logout(token);
-    }
-    authLogout();
+  const handleLogout = () => {
+    logout();
     navigate('/login');
   };
 
@@ -54,7 +50,6 @@ export const UserMenu: React.FC = () => {
             <div className="user-menu-dropdown-header">
               <div className="user-menu-dropdown-header-title">账户</div>
               <div className="user-menu-dropdown-header-username">{user.username}</div>
-              <div className="user-menu-dropdown-header-email">{user.email || '未设置邮箱'}</div>
             </div>
             <button
               className="user-menu-dropdown-item user-menu-dropdown-item--danger"

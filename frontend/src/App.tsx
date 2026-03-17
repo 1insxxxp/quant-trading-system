@@ -57,7 +57,7 @@ const MainLayout: React.FC = () => {
 };
 
 const App: React.FC = () => {
-  const { loadFromStorage, isAuthenticated } = useAuthStore();
+  const { loadFromStorage } = useAuthStore();
 
   useEffect(() => {
     loadFromStorage();
